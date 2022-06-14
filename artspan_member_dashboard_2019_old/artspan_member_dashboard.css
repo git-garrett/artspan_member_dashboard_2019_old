@@ -1,0 +1,59 @@
+/**
+ * class applied to all artspan dashboard blocks, each block has a legend and
+ * its content, which also have their own classes
+ */
+.artspan-block-fieldset {
+ 
+}
+
+/**
+ * class applied to all artspan dashboard block legends
+ */
+.artspan-block-legend {
+    font-weight:bold;
+}
+
+/**
+ * class applied to the content within artspan dashboard blocks
+ */
+.artspan-block-content {
+    padding: 10px 10px 10px 10px;
+}
+.artspan-block-content table{
+    font-size:1em;
+}
+
+/**
+ * class applied to a div containing the links for the user within the blocks
+ */
+.artspan-block-user-links {
+
+}
+
+/**
+ * Classes applied to the two column tables within dashboard blocks
+ */
+.artspan-block-table tr{
+  background: none;
+}
+
+.artist-artwork-missing_image-thumb {
+  width: 480px;
+  height: auto;
+}
+
+.artist-artwork-missing_image-thumb img{
+  width: 100%;
+  height: auto;
+}
+
+.artspan-dashboard-studio-event li {
+}
+
+#views-form-artist-artwork-images-page-page  #edit-actions {
+    display: none;
+}
+
+#views-exposed-form-artist-profile-search-page .views-widget-filter-uid {
+    display: none;
+}

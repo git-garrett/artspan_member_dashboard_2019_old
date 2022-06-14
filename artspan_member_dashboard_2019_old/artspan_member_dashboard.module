@@ -1,0 +1,2832 @@
+<?php
+
+/**
+ * ----------------------------------------------------------------------------------------
+ * 
+ * artspan_member_dashboard.module
+ * Contains functionality around the artist dashboard
+ * 
+ * Description:
+ * Handles functionality surrounding the artist dashboard, especially focused on
+ * SF Open Studios registration & management
+ *
+ * Notes: 
+ * #UpdateEachYear    = functionality that will need to be adjusted/reviewed 
+                        each year prior to launch
+ * #NoCallingFunction = function that isn't called from another function within this module,
+                        either because it's unused/deprecated, called by Drupal, or another 
+                        module.
+   #Unused            = function is not in use currently, safe to remove 
+ * #Unclear           = functionality is currently unclear/unknown
+ *
+ * Basic Structure: 
+ * (Use ctrl+f to goto section numbers)
+ * #1 - Admin
+ * #2 - Artist-Facing Dashboard
+ *   #2.1 General
+ *   #2.2 Membership Status
+ *   #2.3 Public-facing Profile
+ *   #2.4 Studio Events & Guide Images
+ *   #2.5 Sponsors???
+ * #3 - Utility functions
+ * #4 - Unknown/Legacy code inherited from Open Flows
+ * 
+ * ----------------------------------------------------------------------------------------
+**/
+
+
+
+// GLOBAL VARIABLES
+
+// $sign_up is only set in one function, and not obviously used by any other functions
+// Likely deprecated
+// #Unclear
+$sign_up;
+
+
+
+
+
+
+
+
+
+
+/**        
+ * ----------------------------------------------------------------------------------------      
+ *
+ * #1 - Admin
+ *    - Necessary for administrative pages or configuration
+ *
+ *      _permission
+ *      _settings_form
+ *      _menu
+ * 
+ * ----------------------------------------------------------------------------------------
+**/
+
+
+/**
+ * _permission()
+ *
+ * Implements hook_permission()                 
+ *
+ * the permission 'manage member dashboard' will allow a user to look at another user's dash
+ */
+function artspan_member_dashboard_permission() {
+  return array( 'manage member dashboard' => 
+    array('title' => t('Manage Member Dashboard')));
+}
+
+
+
+
+/**
+ * _settings_form()
+ * 
+ * Provides /admin/config/artspan_member_dashboard config page
+ * 
+ * Settings Form definition function, right now does the following:
+ *  -Sets the path of the membership webform for dashboard links
+ *  -Sets the path of the artist profile webform for dashboard links
+ *  -Sets the Event ID of the next Open Studios Event
+ *  -Sets the Contribution Page ID for Membership Renewal dashboard links
+ */
+function artspan_member_dashboard_settings_form($form, &$form_state) {
+  $prefix = 'artspan_member_dashboard_';
+
+  //////////////////////////////////////////////////////////////////////////
+  //MEMBER DASHBOARD SPONSOR BLOCK SETTINGS
+  $form[$prefix.'sponsor_block'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t("Sponsor Block Settings"),
+    '#description' => "<i>".t("")."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    );
+
+  $form[$prefix.'sponsor_block'][$prefix.'sponsor_block_title'] = 
+    array(
+    '#type' => 'textfield', 
+    '#title' => t('Enter the title of the sponsor block'),
+    '#size' => 100,
+    '#maxlength' => 100,
+    '#required' => FALSE, 
+    '#default_value' => 
+      variable_get($prefix.'sponsor_block_title', ''),
+    );
+
+
+  $form[$prefix.'sponsor_block'][$prefix.'sponsor_block_content'] = 
+    array(
+    '#type' => 'textarea', 
+    '#title' => t('Enter in plain text or plain HTML to display in 
+                         the sponsor block'),
+    '#required' => FALSE,
+    '#default_value' => 
+      variable_get($prefix.'sponsor_block_content', ''),
+    );
+
+  //////////////////////////////////////////////////////////////////////////
+  //FORM FIELDS FOR PICKING EVENT/CONTRIBUTION IDS FOR:
+  //  -THE EVENT ID OF THE NEXT OPEN STUDIOS EVENT
+  //  -THE CONTRIBUTION PAGE ID FOR MEMBERSHIPS
+  $form[$prefix.'civicrm_ids_config'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t('Contribution Pages and Events'),
+    '#description' => "<i>".t("Pick the contribution pages and events 
+            that will be used on the dashboard.")
+    ."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    );
+
+  //initialize options array for dropdown
+  $events = array(0=>"<-Select->");
+
+  //FETCH ALL THE EVENT IDS
+  $future_events = artspan_member_dashboard_get_future_events();
+
+  //FETCH CURRENT VALUE
+  $current_value = variable_get($prefix.'os_event_id', 0);
+
+  //PLACE FUTURE EVENTS PLUS CURRENT VALUE (it doesn't exist it yet) into 
+  //dropdown options
+  if ($current_value && !isset($future_events[$current_value])) {
+    civicrm_initialize();
+    $result = civicrm_api3('Event', 'get', array(
+             'sequential' => 1,
+             'id' => $current_value,
+             ));
+    if ($result && isset($result['values']) && $result['values']) {
+      $label = $result['values'][0]['event_title'];
+      $events[$current_value] = $label;
+    }
+  }
+  foreach($future_events as $id=>$value) {
+    $events[$id] = $value;
+  }
+
+
+  //ADD A DROPDOWN FOR ALL FUTURE EVENTS BUT INCLUDING ANY EVENET CURRENTLY SET
+  $form[$prefix.'civicrm_ids_config'][$prefix.'os_event_id'] = 
+      array(
+      '#type' => 'select',
+      '#title' => t("Select the Current Open Studios Event:"),
+      '#options'=> $events,
+      '#description'=>t("Select either the Current OS Event or any other
+             future event."),
+      '#default_value' => variable_get($prefix.'os_event_id', 0),
+      );
+
+
+  //INITIALIZE ARRAY FOR DROPDOWN VALUES OF CONTRIBUTION PAGES
+  $contrib_pages = array(0=>"<-Select->");
+
+  //FETCH ALL CONTRIBUTION PAGE IDS
+  civicrm_initialize();
+  $result = civicrm_api3('ContributionPage', 'get', 
+       array('sequential' => 1,'is_active' => 1,));
+
+  if ($result && isset($result['values']) && $result['values']) {
+    foreach ($result['values'] as $value) {
+      $contrib_pages[$value['id']] = $value['title'];
+    }
+  }
+
+  //ADD THE DROPDOWN FOR ALL ACTIVE CONTRIBUTION PAGES
+  $form[$prefix.'civicrm_ids_config'][$prefix.'membership_contrib_page_id'] = 
+    array(
+    '#type' => 'select', 
+    '#title' => 'The Contribution Page for Membership',
+    '#required' => TRUE, //make this field required
+    '#options'=> $contrib_pages,
+    '#description' => t("Select which Active Contribution Page will 
+            server for Membership Renewals from the Member Dashboard"),
+    '#default_value' => 
+    variable_get($prefix.'membership_contrib_page_id',       1),    
+    );
+
+
+  //////////////////////////////////////////////////////////////////////////
+  //ARTIST MEMBER SETTINGS
+  $form[$prefix.'member_settings'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t("Member Settings"),
+    '#description' => "<i>".t("")
+    ."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    );
+
+  $form[$prefix.'member_settings'][$prefix.'number_of_artwork_images'] = 
+    array(
+    '#type' => 'textfield', 
+    '#title' => t('The number of artwork images the artist is allowed 
+                         to upload'),
+    '#size' => 100,
+    '#maxlength' => 100,
+    '#required' => TRUE, //make this field required
+    '#default_value' => 
+      variable_get($prefix.'number_of_artwork_images', '24'),
+    );
+  
+  //////////////////////////////////////////////////////////////////////////
+  //WEBFORM PATHS MEMBER DASHBOARD WEBFORM LINKS
+  $form[$prefix.'civicrm_path_config'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t('Dashboard Webform Paths'),
+    '#description' => "<i>".t("Set paths for the the various webforms
+           that Artists will use from the dashboard.")
+    ."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    );
+
+  $form[$prefix.'civicrm_path_config'][$prefix.'member_form_path'] = 
+    array(
+    '#type' => 'textfield', 
+    '#title' => t('Membership Webform'),
+    '#size' => 100,
+    '#maxlength' => 100,
+    '#required' => TRUE, //make this field required
+    '#default_value' => 
+      variable_get($prefix.'member_form_path', 
+       'civicrm/contribute/transact?reset=1&id=1'),
+    );
+
+  $form[$prefix.'civicrm_path_config'][$prefix.'public_profile_form_path'] = 
+    array(
+    '#type' => 'textfield', 
+    '#title' => t('Public Profile Webform'),
+    '#size' => 100,
+    '#maxlength' => 100,
+    '#required' => TRUE, //make this field required
+    '#default_value' => 
+    variable_get($prefix.'public_profile_form_path',
+           'node/23232'),
+    
+    );
+
+  //////////////////////////////////////////////////////////////////////////
+  //CIVICRM CUSTOM FIELD ID'S 
+  $form[$prefix.'civicrm_field_ids'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t("Civicrm Custom Field ID's"),
+    '#description' => "<i>".t("Set the custom field ID's.")
+    ."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    );
+
+  $form[$prefix.'civicrm_field_ids'][$prefix.'artist_name'] = 
+    array(
+    '#type' => 'textfield', 
+    '#title' => t('Artist Name Field ID'),
+    '#size' => 100,
+    '#maxlength' => 100,
+    '#required' => TRUE, //make this field required
+    '#default_value' => 
+      variable_get($prefix.'artist_name', '102'),
+    );
+
+  //////////////////////////////////////////////////////////////////////////
+  //FORM FIELDS FOR SETTING NUMBER OF WEEKENDS AND NUMBER OF PREMIUMS ON
+  //CIVICRM PRICE SET VALUES
+  $price_set_values = artspan_member_dashboard_get_price_set_values();
+  $numbers_allowed = array(0=>0, 1=>1, 2=>2, 3=>3, 4=>4);
+
+  $form[$prefix.'civicrm_priceset_config'] = 
+    array(
+    '#type' => 'fieldset',
+    '#title' => t('Open Studios Price Set Configuration'),
+    '#description' => "<i>".t("Set the number of Weekends and number of 
+            Premium Weekends for each of the Price Set Values below")."</i>",
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    );
+
+  foreach ($price_set_values as $id=>$value) {
+    if (!$value || $value=='one' || $value=='two' || $value=='Custom Price') {
+      continue;
+    }
+    $form[$prefix.'civicrm_priceset_config'][$id] = 
+      array(
+      '#type' => 'fieldset',
+      '#title' => $value,
+      '#collapsible' => FALSE,
+      '#collapsed' => FALSE,
+      );
+
+    $premium_count_var_name = $prefix.'premium_count_'.$id;
+    $weekend_count_var_name = $prefix.'weekend_count_'.$id;
+    
+    $form[$prefix.'civicrm_priceset_config'][$id][$weekend_count_var_name] = 
+      array(
+      '#type' => 'select',
+      '#title' => t("Number of Weekends:"),
+      '#options'=> $numbers_allowed,
+      '#prefix' => "<table><tr><td>",
+      '#suffix' => "</td>",
+      '#default_value' => variable_get($weekend_count_var_name, 0),
+      );
+    $form[$prefix.'civicrm_priceset_config'][$id][$premium_count_var_name] = 
+      array(
+      '#type' => 'select',
+      '#title' => t("Number of Premium Weekends:"),
+      '#options'=> $numbers_allowed,
+      '#prefix' => "<td>",
+      '#suffix' => "</td></tr></table>",
+      '#default_value' => variable_get($premium_count_var_name, 0),
+      );
+
+  }
+
+  return system_settings_form($form);
+}
+
+
+/** 
+ * _dashboard_menu()
+ *
+ * implementation of hook_menu
+ *
+ * Creates admin menu links for managing dashboard
+*/
+function artspan_member_dashboard_menu() {
+
+  $items = array();
+
+  // Dashboard link - #Unused
+  $items['dashboard'] =
+    array(
+    'title' => 'Member Dashboard',
+    'description' => 'Member Dashboard',
+    'page callback' => 'artspan_member_dashboard_page',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+    );
+
+  // Admin config link
+  $items['admin/config/artspan_member_dashboard'] =
+    array(
+    'title' => 'ArtSpan Member Dashboard Settings',
+   'description' => 'ArtSpan Member Dashboard Settings Form Page',
+   'page callback' => 'drupal_get_form',
+   'page arguments' => array('artspan_member_dashboard_settings_form'),
+   'access arguments' => array('access administration menu'),
+   'type' => MENU_NORMAL_ITEM,
+   );
+
+
+  return $items;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/** 
+ * ----------------------------------------------------------------------------------------
+ *
+ * #2 - Artist-Facing Dashboard
+ *    - Responsible for handling the generation of the dashboard space, SFOS registrations
+ *
+ *   
+ *         _user_view
+ *         _page                           // gets $member & Generates dashboard
+ *           _get_member_array             // generates $member
+ *           _os_event_id
+
+ *           _account_block                // #2.1 Account Info (takes $member) 
+   
+ *           _membership_block             // #2.2 Membership Status (takes $member) 
+ *             FIXME _artist_contrib_id
+ *             FIXME _supporter_contrib_id
+ *             FIXME _member_artist_page
+ *             FIXME _supporter_contrib_page
+   
+ *           _profile_block                // #2.3 Public-facing Profile (takes $member)
+   
+ *           _events_block                 // #2.4 Studio Events & Guide Images (takes $member)
+             _form_alter
+               _studio_event_form_alter
+                 _get_non_filtered_group_studios
+             _guide_image_view_field_no_results
+   
+ *           _sponsor_block                // #2.5 Sponsors??? (takes $member) 
+ *             _sponsor_block_title
+ *             _sponsor_block_content
+ * 
+ * ----------------------------------------------------------------------------------------
+**/
+
+
+/**
+ * ////////////////////////////////////////////////////////////////////////////////////////
+ *  
+ * #2.1 General
+ *       _user_view
+ *       _get_future_events
+ *       _get_price_set_values
+ *       _page
+ *       _get_member_array
+ *         _os_event_id
+ *       _account_block
+ * 
+ * ////////////////////////////////////////////////////////////////////////////////////////
+**/
+
+
+/**
+ * QUESTION 
+ * Directs a user to their dashboard whenever they arrive on the homepage?
+ * 
+ * #Unclear
+ */
+function artspan_member_dashboard_user_view() {
+  $user = user_load(arg(1));
+
+  if ($user) {
+    $path = "dashboard/".$user->name;
+  }
+  else {
+    $path = "dashboard";
+  }
+
+  drupal_goto($path);
+}
+
+/**
+ * _get_future_events()
+ *
+ * Function will use the CiviCRM API to find all future events
+ * 
+ */
+function artspan_member_dashboard_get_future_events() {
+  $future_events = array();
+  civicrm_initialize();
+  $date = date('Y-m-d');
+
+  $result = civicrm_api3('Event', 'get', 
+       array(
+             'sequential' => 1,
+             'end_date' => array('>=' => $date),
+             ));
+
+  if ($result && isset($result['values']) && $result['values']) {
+    foreach ($result['values'] as $value) {
+      $future_events[$value['id']] = $value['event_title'];
+    }
+  }
+
+  return $future_events;
+}
+
+/**
+ * _get_price_set_values()
+ *
+ * Function will use the CiviCRM API to find all the defined price set options set in admin area
+ */
+function artspan_member_dashboard_get_price_set_values() {
+  $price_set_values = array();
+  civicrm_initialize();
+
+  $result = civicrm_api3('PriceFieldValue', 'get', array(
+               'sequential' => 1,
+               'options' =>
+               array('limit'=>200),
+               ));
+  if ($result && isset($result['values']) && $result['values']) {
+    foreach ($result['values'] as $value) {
+      $price_set_values[$value['id']] = $value['label'];
+    }
+  }
+  return $price_set_values;
+}
+
+/**
+ * _page()
+ * 
+ *  The call back function for the dashboard menu item defined in 
+ * artspan_member_dashboard_menu()
+ * Note: This generates the actual dashboard page 
+ * 
+ */
+function artspan_member_dashboard_page() {
+  $ret = "";
+
+  $ret .= '<div class="home-link">' . l("Visit the ArtSpan Home Page", "home") . '</div>';
+
+  $member = artspan_member_dashboard_get_member_array();
+
+  artspan_member_profile_cache_single($member['uid'], "Viewing Dashboard");
+  
+  $_SESSION['artspan_member'] = $member;
+
+  if(filter_input(INPUT_GET, 'debug')) {
+    dsm($member, 'my member');
+  }
+
+  drupal_set_title($member['page_title']);
+  $blocks = array(
+      "account",
+      "events", 
+      "membership",
+      "profile", 
+      "sponsor",
+      );
+
+  // Generate each Dashboard block
+  foreach($blocks as $type) {
+    $function_name = 'artspan_member_dashboard_'.$type.'_block';
+
+    $content = $function_name($member);
+    $ret .= artspan_member_dashboard_block_html($content);
+  }
+
+
+  // Debugging info for the dashboard (toggle with true/false)
+  if (false) {
+
+    // if this dashboard is for a specific user, get that user
+    //$account = user_load_by_name(arg(1));
+    $account = $ret['manager'] ?  user_load_by_name(arg(1)) : NULL;
+
+    if ($account) { 
+      $accountID = $account->uid;
+    }
+    // otherwise, load the current user
+    else {
+      global $user;
+      $accountID = $user->uid;
+    }
+
+    $contact = civicrm_api3('UFMatch', 'get', array('sequential' => 1, 'uf_id' => $accountID));
+    $contactID = $contact['values'][0]['contact_id'];
+
+    $membership = civicrm_api3('Membership', 'get', array('sequential' => 1, 'contact_id' => $contactID, 'membership_type_id' => 1));
+    $membershipStatusID = $membership['values'][0]['status_id'];
+
+    $membershipStatus = civicrm_api3('MembershipStatus', 'get', array('sequential' => 1, 'id' => $membershipStatusID));
+
+    $membershipName = $membershipStatus['values'][0]['name'];
+    $membershipLabel = $membershipStatus['values'][0]['label'];
+
+    // Compile Debug Info
+    $debug = t("Membership Status from existing member object: ") . $member['membership_status'];
+    $debug .= "<br> - account->uid: " . $accountID;
+    $debug .= "<br> - contactID: " . $contactID;
+    $debug .= "<br> - membershipName: " . $membershipName;
+    $debug .= "<br> - membershipLabel: " . $membershipLabel;
+    $debug .= "<br> - arg(1): " . arg(1);
+
+    print_r($debug);
+
+
+  }
+  
+  return $ret;
+}
+
+
+/**
+ * _get_total_weekends_count()
+ * 
+ * Description: Function that returns if user has finished signing up
+ *
+ * Returns:     the number of weekends the user is registered for
+ *
+**/
+function artspan_member_dashboard_get_total_weekends_count() {
+ 
+  $member = $_SESSION['artspan_member'];
+  $participant_id = $member['os_participant_id'];
+  $participant = 
+  artspan_member_dashboard_get_civi_objects('Participant', FALSE, 
+              array('id' => 
+              $participant_id));
+
+  //GET UF_MATCH FROM PARTICIPANT
+  $uf_match = $participant ? 
+  artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, 
+              array('contact_id' => 
+              $participant['contact_id'])): NULL;
+
+  //For two users who have different array type
+  if($participant['participant_fee_level'][0] == 'P') {
+    $week_selected = rtrim($participant['participant_fee_level'], " - 1");
+  }
+  else if(strpos($participant['participant_fee_level'][0], "SP")) {
+  	$week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
+  	if(strpos($participant['participant_fee_level'][0], "One")) {
+  		$member['os_weekend_count'] = 1;
+  		return $member['os_weekend_count'];
+  	}
+  	else if(strpos($participant['participant_fee_level'][0], "Two")) {
+  		$member['os_weekend_count'] = 2;
+  		return $member['os_weekend_count'];
+  	}
+  }
+  else {
+    $week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
+  }
+
+  $price_field_value = 
+  artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
+     array('label' =>  $week_selected)); 
+  //$participant['participant_fee_level'][0]));
+
+  $weekend_count_var_name= 'artspan_member_dashboard_weekend_count_'.
+  $price_field_value['id'];
+
+  $weekend_count = variable_get($weekend_count_var_name);
+  $member['os_weekend_count'] = $weekend_count;
+  $studio_event_count = 
+  db_query("SELECT count(1) from {node} n
+            INNER JOIN {field_data_field_studioevent_participant_id} p
+            ON n.vid=p.revision_id
+            WHERE n.type='studio_event' 
+            AND p.field_studioevent_participant_id_value=:pid", 
+            array(':pid' => $participant_id))->fetchField();
+
+  return $member['os_weekend_count'];
+
+  /** if ($studio_event_count >= $weekend_count) {
+   $finished = true;
+  }
+  else {
+  $finished = false;
+   }
+  return $finished;**/
+}
+
+/**
+ * _get_member_array()
+ *
+ * Will build an array of all the relvant information about the member, 
+ * including contact record info, event participation records, studio events,
+ * artwork images, and profile information
+ * 
+ * Note: This could be broken up into several functions, one for each chunk of data
+ * *     ALSO Creates a number of dashboard prompts
+ * 
+ * Items in Final Array:
+ *   manager                   // Drupal data
+ *   account
+ *   destination
+ *   mode
+ *   uid
+ *   mail
+ *   username
+ *   contact_id                // Civi data
+ *   contact
+ *   street_address
+ *   city
+ *   postal_code
+ *   state
+ *   display_name
+ *   page_title
+ *   membership_id             // membership info
+ *   membership_join_date
+ *   membership_start_date
+ *   membership_end_date
+ *   membership_name
+ *   os_event_title            // SFOS 
+ *   os_event_id
+ *   os_participant
+ *   os_participant_id
+ *   os_priceset_label
+ *   os_priceset_field_id
+ *   os_premium_count
+ *   studio_events             // SFOS Studio Events
+ *   studio_event_counter
+ *   add_studio_event_link
+ *   guide_images              // SFOS Guide Images
+ *   guide_image_counter
+ *   add_guide_image_link
+**/
+function artspan_member_dashboard_get_member_array($arg = NULL) {
+  global $user;
+  $ret = array();
+  civicrm_initialize();
+
+
+  // 1. LOAD USER INFO
+  // -------------------------------------------------------------------------------------
+  // Get the basic user data, from either the currently logged in user, or the designated
+  // user that the dashboard is representing (in the case of an admin viewing an artist)
+
+  // Determine if user is a manager based on drupal permission
+  $ret['manager'] = user_access('manage member dashboard');
+
+  // if this dashboard is for a specific user, get that user
+  //$account = user_load_by_name(arg(1));
+  $account = $ret['manager'] ?  user_load_by_name(arg(1)) : NULL;
+
+  if ($account) { 
+    $accountID = $account->uid;
+    $ret['account'] = $account;
+    $ret['mode'] = 'manage';
+    $ret['destination'] = 'dashboard/' . $arg; //set destination for dashboard with arg
+  }
+  // otherwise, load the current user
+  else {
+    $account = $user;
+    $accountID = $user->uid;
+    $ret['destination'] = 'dashboard'; //set destination for plain dashboard
+  }
+
+  //if the mode wasn't set above from $arg assume mode is user mode
+  if (!isset($ret['mode']) || !$ret['mode']) {
+    $ret['mode'] = 'user';
+  }
+
+  //set some user related variables
+  $ret['uid'] =  $accountID;
+  if ($ret['uid']) {
+    $ret['mail'] = $account->mail;
+    $ret['username'] = $account->name;
+  }
+  else {
+    $ret['mail'] = "";
+    $ret['username'] = "";
+  }
+
+
+  // 2. LOAD CIVI CONTACT
+  // --------------------------------------------------------------------------------------
+  // Get the core contact data for this user from Civi
+
+  //fetch the contact id
+  $contact = civicrm_api3('UFMatch', 'get', array('sequential' => 1, 'uf_id' => $accountID));
+  $contactID = $contact['values'][0]['contact_id'];
+
+  if ($contact) {
+    $ret['contact_id'] = $contactID;
+
+    $contactData = civicrm_api3('Contact', 'get', array(
+               'sequential' => 1,
+               'id' => $ret['contact_id'],
+               ));
+
+    // Address Info
+    if ($contactData && 
+        isset($contactData['values']) && 
+        isset($contactData['values'][0]) && 
+        $ret['contact']['street_address'] !== NULL && 
+        $ret['contact']['city'] !== NULL && 
+        $ret['contact']['postal_code'] !== NULL && 
+        $ret['contact']['state_province_id'] !== NULL) {
+
+      $ret['contact'] = $contactData['values'][0];
+      $ret['street_address'] = $ret['contact']['street_address'];
+      $ret['city'] = $ret['contact']['city'];
+      $ret['postal_code'] = $ret['contact']['postal_code'];
+      $ret['state'] = $ret['contact']['state_province_id'];
+      
+      if ($ret['state']) {
+        $result2 = civicrm_api3('Address', 'getoptions', 
+        array(
+              'field' => "state_province_id",
+              ));
+        if ($result2 && isset($result2['values'])) {
+          $ret['state'] = $result2['values'][$ret['state']];
+        }
+      } 
+    }
+  }
+  else {
+    $ret['street_address'] = "";
+    $ret['city'] = "";
+    $ret['postal_code'] = "";
+    $ret['state'] = "";
+  }
+
+  // Display Name
+  if ($ret['contact']['display_name']) {
+    $ret['display_name'] = $ret['contact']['display_name'];
+  }
+  else {
+    $ret['display_name'] = $ret['username'];
+  }
+
+  // Page title for the dashboard
+  if ($ret['uid']) {
+    $ret['page_title'] = ($ret['mode'] == 'manage') ? 
+      "Dashboard for Artist: " . $ret['display_name'] : 
+      "Welcome to your Dashboard, ". $ret['display_name'];
+  }
+  else {
+    $ret['page_title'] = "Member Dashboard";
+  }
+
+  // 3. LOAD MEMBERSHIP
+  // -------------------------------------------------------------------------------------
+  // Data about a user's membership
+
+  if (isset($contactID)) {
+
+    $membership = civicrm_api3('Membership', 'get', array('sequential' => 1, 'contact_id' => $contactID, 'membership_type_id' => 1));
+    $membershipStatusID = $membership['values'][0]['status_id'];
+
+    // Membership data
+    if ($membership) {
+
+      if (isset($membership['values']) 
+       && isset($membership['values'][0]) 
+       && $membership['values'][0]['join_date'] !== NULL 
+       && $membership['values'][0]['start_date'] !== NULL 
+       && $membership['values'][0]['end_date'] !== NULL 
+       && $membership['values'][0]['id'] !== NULL 
+       && $membership['values'][0]['membership_name'] !== NULL) {
+
+        $ret['membership_id'] = $membership['values'][0]['id'];
+        $ret['membership_join_date'] = $membership['values'][0]['join_date'];
+        $ret['membership_start_date'] = $membership['values'][0]['start_date'];
+        $ret['membership_end_date'] = $membership['values'][0]['end_date'];
+        $ret['membership_name'] = $membership['values'][0]['membership_name'];
+
+        // Membership Status Data
+        // #FIXME -- membership_status doesn't return data at all on the dashboard
+        //        -- find out why, temporarily replaced this datapoint with direct calls to Civi that
+        //        -- we know work.
+        $membershipStatus = civicrm_api3('MembershipStatus', 'get', array('sequential' => 1, 'id' => $membershipStatusID));
+        
+        if ($membershipStatus 
+         && isset($membershipStatus['values']) 
+         && isset($membershipStatus['values'][0]) 
+         && $membershipStatus['values'][0]['label'] !== NULL 
+         && $membershipStatus['values'][0]['is_current_member'] !== NULL) {
+
+          $ret['membership_status'] = $membershipStatus['values'][0]['label'];
+          $ret['membership_current'] = $membershipStatus['values'][0]['is_current_member'];
+        }
+      }
+    }
+  }
+  // if there's no contact ID
+  else {
+    $ret['membership_id'] = NULL;
+  }
+
+  //FETCH THE NEXT OPEN STUDIOS EVENT
+  $event_id = variable_get('artspan_member_dashboard_os_event_id', 0);
+  if ($event_id) {
+    $result = civicrm_api3('Event', 'get', 
+         array('sequential' => 1, 'id' => $event_id,));
+
+    if ($result && isset($result['values']) && $result['values']) {
+      $ret['os_event_title'] = $result['values'][0]['event_title'];
+      $ret['os_event_id'] = $event_id;
+    }
+  }
+    
+  if (!isset($ret['contact_id'])) {
+    return $ret;
+  }
+  
+  //LOOK FOR A PARTICPANT RECORD FOR THE CONTACT ON THE NEXT OPEN STUDIO EVENT
+  $result = civicrm_api3('Participant', 'get', 
+       array(
+             'sequential' => 1,
+             'contact_id' => $ret['contact_id'],
+             'event_id' => $ret['os_event_id'],
+             ));
+
+  if ($result 
+    && isset($result['values']) 
+    && $result['values'] 
+    && isset($result['values'][0]) 
+    && $result['values'][0]['participant_id'] !== NULL) {
+
+    $ret['os_participant'] = $result['values'][0];
+    $ret['os_participant_id'] = $result['values'][0]['participant_id'];
+
+    //For two users with othe type of array
+    if($result['values'][0]['participant_fee_level'][0] == 'P') {
+      $ret['os_priceset_label'] = $result['values'][0]['participant_fee_level'];
+    }
+    else {
+      $ret['os_priceset_label'] = $result['values'][0]['participant_fee_level'][0];
+    }
+
+    $result2 = civicrm_api3('PriceFieldValue', 'get', 
+         array(
+         'sequential' => 1,
+         'label' => $ret['os_priceset_label'],
+         ));
+
+
+    if ($result2 
+      && isset($result2['values']) 
+      && $result2['values'] 
+      && $result2['values'][0]['id'] !== NULL) {
+
+      $ret['os_priceset_field_id'] = $result2['values'][0]['id'];
+      $premium_count_var_name ='artspan_member_dashboard_premium_count_' . $ret['os_priceset_field_id'];
+      $weekend_count_var_name= 'artspan_member_dashboard_weekend_count_' . $ret['os_priceset_field_id'];
+      
+      $ret['os_premium_count'] = variable_get($premium_count_var_name,0);
+      $ret['os_weekend_count'] = variable_get($weekend_count_var_name,0);
+  
+    }
+  }
+
+  //IF WE HAVE A PARTICIPANT, GET STUDIO EVENTS AND THEIR GUIDE IMAGES
+  if (isset($ret['os_participant_id']) && $ret['os_participant_id']) {
+    $ret['add_studio_event_link'] =  
+      l("Add SF Open Studios Listing", "node/add/studio-event",
+      array('query'=>
+        array('destination'=>$ret['destination'],
+        'participant_id'=>
+        $ret['os_participant_id'])));
+
+    //GET VIEW OF ALL THE STUDIO EVENTS TIED TO THE PARTICIPANT ID
+    $view = views_get_view('studio_event_member_dashboard_block');
+    if (!$view) {
+      drupal_set_message("Error Code 25589: Missing view:".
+       'studio_event_member_dashboard_block', 'error');
+      return;
+    }
+    $view->set_arguments(array($ret['os_participant_id']));
+    $view->execute();
+    $results = $view->result;
+    
+    $ret['guide_image_counter'] = 0;
+    $ret['studio_event_counter'] = 0;
+
+    $ret['add_guide_image_link'] = array();
+    $ret['studio_events'] = array();
+    $ret['guide_images'] = array();
+
+    //LOOP OVER ALL OF THE STUDIO EVENTS
+    foreach($results as $result) {
+      $studio_event = node_load($result->nid);
+      $ret['studio_events'][] = $studio_event;
+      $ret['studio_event_counter'] ++;
+      
+      $img_view = views_get_view('studio_event_guide_image_view_field');
+      if (!$img_view) {
+        drupal_set_message("Error Code 17889: Missing view:".
+         'studio_event_guide_image_view_field', 'error');
+        return;
+      }
+      $img_view->set_arguments(array($result->nid));
+      $img_view->execute();
+      $img_results = $img_view->result;
+
+      if ($img_results) {
+        foreach($img_results as $img_result) {
+          $ret['guide_images'][] = node_load($img_result->nid);
+          $ret['guide_image_counter'] ++;
+        }
+      }
+      else {
+        $wrapper = entity_metadata_wrapper('node', $studio_event);
+
+        $weekend = $wrapper->field_studioevent_weekend->value();  
+  
+        if ($weekend) {
+          $weekend_label = $wrapper->field_studioevent_weekend->label();
+          $field_name = 'field_studioevent_weekend'.$weekend.'_hood';
+          $neighborhood = $wrapper->{$field_name}->label();
+        }
+
+        $cid = $wrapper->field_studioevent_contact->value();
+        
+        $studio_contact = artspan_member_dashboard_get_civi_objects('Contact', FALSE, array('id'=> $cid));
+
+        $studio_event_label = $weekend_label . " - ". $studio_contact['display_name'];
+
+        $ret['add_guide_image_link'][] ="<strong>".$studio_event_label." -- </strong>".
+          l(t("Add Guide Image"), "node/add/guide-image",
+            array("query"=>
+            array('destination' => $ret['destination'],
+            'field_guide_image_studio_event' => $result->nid)));
+      
+      }
+    }
+
+    //check to see if we already have enough guide images, if so empty out 
+    //the add guide image links
+    if ($ret['add_guide_image_link'] 
+      && (count($ret['guide_images']) >= $ret['os_premium_count'])) {
+
+      $ret['add_guide_image_link'] = array();
+    }
+  }
+
+  //Public Artist Name
+  $field = 'custom_'.variable_get('artspan_member_dashboard_artist_name');
+  $ret['artist_name'] = artspan_member_dashboard_get_civi_objects('Contact', FALSE, array('id'=> $ret['contact_id'], 'return' => $field), 'getvalue');
+
+  $ret['artist_name'] = $ret['artist_name'] ? $ret['artist_name'] : $ret['display_name'];
+
+  return $ret;
+}
+
+/**
+ * _account_block()
+ * Function that defines the Account block
+ *
+ * @param $member - this is an array that has all information about the user,
+ * contact, particpant records, studio event nodes, and image content types
+ */
+function artspan_member_dashboard_account_block($member) {
+ $ret = array();
+ $link = '';
+ $ret['header'] = ($member['mode'] == 'manage') ? 
+   t("Artist Info"): t("Your Info");
+
+ //if the user is not logged in, give them links to login and register
+ if (!$member['uid']) {
+   $ret['body'] = "<ul><li>";
+   $ret['body'] .= t("You need an account to access your dashboard.");
+   $ret['body'] .= "</li></ul><div class='artspan-block-user-links'>";
+   $ret['body'] .= l(t("Login"),'user',array('query'=>
+               array('destination' => 
+               $member['destination'])));
+   $ret['body'] .= "<br/>".
+     l(t("Register"),'user/register',
+       array('query' => array('destination' => $member['destination'])));
+
+   $ret['body'] .= "</div>";
+ }
+ //display the drupal account information and link to account edit
+ else {
+   $body = "";
+   $body .= views_embed_view('artist_private_profile_block','default', 
+           $member['contact_id']);
+   
+   $body .= "<div class='artspan-block-user-links'>";
+
+   $txt = ($member['mode'] == 'manage') ? t("Edit Account") : 
+     t("Change your Password/Email here");
+   
+   $body .= "<span class='profile-button'>".l($txt, "user/".$member['uid']."/edit",
+        array('query'=>array('destination'=>$member['destination'])))."</span>";
+
+   $body .= "<br/>";
+   if (isset($member['street_address']) && $member['street_address']) {
+     $txt = ($member['mode'] == 'manage') ? t("Edit Address") : 
+     t("Edit your Name and Address here");
+   
+     $body .= "<span class='profile-button'>".l($txt, "user/".$member['uid'].
+    "/edit/Personal Information",
+    array('query'=>array('destination'=>$member['destination'])))."</span>";
+   }
+
+   $body .= $member['manager'] ? 
+     "<span class='profile-button'>"."<br/>".l(t("View Contact Record"), "civicrm/contact/view",
+       array('query'=>array('reset'=>1,'cid'=>$member['contact_id'])))."</span>" : "";
+                
+   $body .= "</div>";
+
+  $headshot_block = 
+    views_embed_view('artist_head_shot', 'default', $member['uid']);
+
+
+  $link .= "<span class='profile-button'>".l("Update your Profile Headshot", "user/".$member['uid']."/edit",
+        array('query'=>array('destination'=>$member['destination'])))."</span>";
+
+  $headshot_block .= "<br/>". $link;
+
+  $content['header'] = t("Profile Headshot");
+  $content['body'] = $headshot_block;
+
+  $headshot_block = artspan_member_dashboard_block_html($content);
+
+   $ret['body'] = "<table><tr><td>".$body."</td><td>&nbsp;</td><td>".
+     $headshot_block."</td></tr></table>";
+     
+ }
+ return $ret;
+}
+
+
+/**
+ * ////////////////////////////////////////////////////////////////////////////////////////
+ *  
+ * #2.2 Membership Status
+ *       _membership_block
+ *         FIXME _artist_contrib_id
+ *         FIXME _supporter_contrib_id
+ *         FIXME _member_artist_page
+ *         FIXME _supporter_contrib_page
+ * 
+ * ////////////////////////////////////////////////////////////////////////////////////////
+**/
+
+/**
+ * Function that defines the Membership block
+ *
+ * @param $member - this is an array that has all information about the user,
+ * contact, particpant records, studio event nodes, and image content types
+ */
+function artspan_member_dashboard_membership_block($member) {
+  $ret = array();
+
+  //only the account block will show up for non logged in users
+  if (!$member['uid']) {
+    return $ret;
+  }
+
+  $ret['header'] = ($member['mode'] == 'manage') ? 
+    t("Artist Membership") : t("Your Membership");
+
+  $admin_membership_links = "";
+
+  if (isset($member['membership_id']) && $member['membership_id']) {
+    //if we are in in manage mode, give direct civcirm links 
+    if ($member['mode'] == 'manage') {
+      $admin_membership_links .= " ";
+      $admin_membership_links .=
+        l(t("(View Membership)"), "civicrm/contact/view/membership",
+          array('query'=>array(
+                               'reset' => 1,
+                               'id' => $member['membership_id'],
+                               'cid' => $member['contact_id'],
+                               'action'=>'view',
+                               )));
+      $admin_membership_links .= " ";
+      $admin_membership_links .=
+        l(t("(Edit Membership)"), "civicrm/contact/view/membership",
+          array('query'=>array(
+                               'reset' => 1,
+                               'id' => $member['membership_id'],
+                               'cid' => $member['contact_id'],
+                               'action'=>'update',
+                               )));
+
+
+    }
+
+    //display memberhip details
+    $body = "<ul>";
+
+    $body .= "<li><b>".t("Membership Type:")."</b> ".
+      $member['membership_name']."</li>";
+
+    $body .= "<li><b>".t("Membership Status:")."</b> ".
+      $member['membership_status'].$admin_membership_links."</li>";
+
+    $body .= "<li><b>".t("Start Date:")."</b> ".
+      $member['membership_start_date']."</li>";
+
+    $body .= "<li><b>".t("End Date:")."</b> ".
+      $member['membership_end_date']."</li>";
+
+    $body .= "</ul>";
+
+    //we are viewing as a user
+    if ($member['mode'] != 'manage') {
+      if ($member['membership_name'] == 'Artist') {
+  //FIXME, ADD AS A REAL SETTINGS FORM FIELD
+  $id = variable_get('artspan_member_dashboard_artist_contrib_id',
+           3);
+  $text = t("Renew your Artist Membership");
+      }
+      else {
+  //FIXME, ADD AS A REAL SETTINGS FORM FIELD
+  $id = variable_get('artspan_member_dashboard_supporter_contrib_id',
+           1);
+  $text = t("Renew your Supporter Membership");
+      }
+
+      $body .= "<div class='artspan-block-user-links'>";
+      $body .= 
+  "<span class='profile-button'>".l($text, "civicrm/contribute/transact",
+    array('query'=>
+    array(
+          'reset' => 1,
+          'id' => $id, 
+          'cid' => $member['contact_id'],
+          )))."</span>";
+      $body .= "</div>";
+    }
+  }
+  else {
+    if ($member['mode'] == 'manage') {
+      $path = 'civicrm/member/add';
+      $link = l(t("Add membership here"), $path,
+                array('query'=>array('reset'=>1,
+                                     'action'=>'add',
+                                     'context'=>'standalone')));
+      $body = t("User is not a current member of ArtSpan.")." ".$link;
+    }
+    else {
+      //FIXME - ADD THESE THE SETTINGS FORM
+      $path = variable_get('artspan_member_dashboard_member_artist_page',
+                           'civicrm/contribute/transact?reset=1&id=3');
+      $artist_link = l(t("Join us as an Artist Member here"), $path);
+      $path = variable_get('artspan_member_dashboard_supporter_contrib_page',
+                           'civicrm/contribute/transact?reset=1&id=1');
+      $support_link = l(t("Join us as an Supporting Member here"), $path);
+
+      $body = t("You are not a current member of ArtSpan. You must be a ".
+    "member to register for events - join now!")."<br/>";
+      $body .= $artist_link."<br/>".$support_link;
+
+    }
+    $body = "<ul><li>".$body."</li></ul>";
+  }
+
+  $ret['body'] = $body;
+  return $ret;
+}
+
+
+/**
+ * ////////////////////////////////////////////////////////////////////////////////////////
+ *  
+ * #2.3 Public-facing Profile
+ *       _profile_block
+ * 
+ * ////////////////////////////////////////////////////////////////////////////////////////
+**/
+
+/**
+ * Function that defines the Profile Block
+ *
+ * @param $member - this is an array that has all information about the user,
+ * contact, particpant records, studio event nodes, and image content types
+ */
+function artspan_member_dashboard_profile_block($member) {
+  $ret = array();
+
+  //only the account block will show up for non logged in users
+  if (!$member['uid'] || !isset($member['membership_id']) ||
+      !$member['membership_id']) {
+
+    //slight change, now if you have artwork  images you see the profile
+    $profile_count = db_query("SELECT count(1) from {node} 
+                               WHERE type='artist' 
+                               AND uid > 0 && uid=:uid", 
+            array(':uid' => $member['uid']))->fetchField();
+    if (!$profile_count) {
+      return $ret;
+    }
+  }
+
+
+  //we have an active membership, check status.  Prompt for renewal, if membership is expired.
+  else if ($member['membership_status'] != 'New' && 
+     $member['membership_status'] != 'Current' &&
+     $member['membership_status'] != 'Pending' &&
+     $member['membership_status'] != 'Grace') {
+    
+      //Check if there is an event with open registration, if not, display messages for users with expired accounts
+      $active = artspan_member_dashboard_active_event();
+
+      if($active == FALSE) {
+
+          $msg = t("Your artist membership has expired.  <br />Renew today to continue to have access to ArtSpan opportunities and keep your profile page visible to the public.   <br /><a href='https://www.artspan.org/artist-membership'>Click here for a full listing of Artist Benefits.</a>");
+          $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+          drupal_set_message($msg, 'error');
+        
+          return $ret;
+        }
+      else {
+        return $ret;
+      }
+  }
+  //Check if there is an event with open registration, if not, display messages for users with expired accounts
+  $active = artspan_member_dashboard_active_event();
+  if($active == FALSE) {
+    if (!isset($member['membership_status'])) {
+      $msg = t("You are not a current member of ArtSpan.  <br />Join today to to have access to ArtSpan opportunities and a profile page visible to the public.   <br /><a href='https://www.artspan.org/artist-membership'>Click here for a full listing of Artist Benefits.</a>");
+      $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+      drupal_set_message($msg, 'error');
+    
+      return $ret;
+    }
+
+    elseif ($member['membership_status'] != 'New' && 
+     $member['membership_status'] != 'Current' &&
+     $member['membership_status'] != 'Pending' &&
+     $member['membership_status'] != 'Grace') {
+      $msg = t("Your artist membership has expired.  <br />Renew today to continue to have access to ArtSpan opportunities and keep your profile page visible to the public.   <br /><a href='https://www.artspan.org/artist-membership'>Click here for a full listing of Artist Benefits.</a>");
+      $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+      drupal_set_message($msg, 'error');
+    
+      return $ret;
+    }
+  }
+  elseif ($member['membership_status'] != 'New' && 
+     $member['membership_status'] != 'Current' &&
+     $member['membership_status'] != 'Pending' &&
+     $member['membership_status'] != 'Grace') {
+      return $ret;
+  }
+
+
+
+  $ret['header'] = ($member['mode'] == 'manage') ? 
+    t("Artist Public Profile") : t("Your Public Artist Profile");
+  // $profile_link = l("View Public Profile Page", 'artist/'.
+  //      $member['username']);
+  // $edit_link = l(t("Edit your Artist Profile"), 
+  //    variable_get('artspan_member_dashboard_public_profile_form_path',
+  //     'public_profile_form'),
+  //    array('query'=>array('destination'=>$member['destination'])));
+
+  // $body = $profile_link."<br/>".$edit_link;
+  $body = "<div class='artspan-block-table'><table><tr><td>";
+  $body .= views_embed_view('artist_public_profile_block','default', 
+          $member['contact_id']);
+  
+  $body .= ($member['mode'] == 'manage') ? 
+    l(t("Edit Contact Record"), "civicrm/contact/add",
+      array('query'=>array('reset'=>1,'cid'=>$member['contact_id'],
+         'action'=>'update'))) : 
+
+    // l("View Public Profile Page", 'artist/'.$member['username']),
+    "<span class='profile-button'>".l(t("Edit your Artist Profile"), 
+      variable_get('artspan_member_dashboard_public_profile_form_path',
+       'public_profile_form'),
+      array('query'=>array('destination'=>$member['destination'])))."</span>";
+
+  $body .= "<br />";
+  $body .= "<span class='profile-button'>".l("View Public Profile Page", 'artist/'.$member['username'])."</span>";
+  
+  $body .= "</td><td>";
+
+  $artwork_block = '';
+  $artwork_block .= "<div align='center' class='artist-artwork-image-thumb'>";
+  $artwork_block .= views_embed_view('artist_artwork_images','block1',
+                            $member['uid']);
+  
+  
+
+  $number_of_allowed = 
+    variable_get('artspan_member_dashboard_number_of_artwork_images');
+
+
+  $artwork_count = db_query("SELECT count(1) from {node} n
+                             INNER JOIN {field_data_field_artwork_artist} a
+                             ON a.revision_id=n.vid 
+                             WHERE n.type='artwork' 
+                             AND a.field_artwork_artist_target_id=:uid", 
+          array(':uid' => $member['uid']))->fetchField();
+  
+  if ($artwork_count > 0) {
+    $path = "members/images/artwork/".$member['uid'];
+    $artwork_block .= "<ul><li>".
+      l(t("View All Images"), $path,
+  array('query'=>array('destination'=>
+           $member['destination'])));
+
+    $artwork_block .= "</li><li>".l(t("Add Another Image"), "node/add/artwork",
+           array('query'=>array('field_artwork_artist' =>
+              $member['uid'],
+              'destination'=>
+              $member['destination'])));
+    $link = l(t("Click here"), $path,
+        array('query'=>array('destination'=>
+           $member['destination'])));
+
+    $artwork_block .= "</li><li></br>".
+      t("!link to designate the artwork image that will appear as your ".
+  "main header image on your artist profile and as your image ".
+  "thumbnail in the artist directory search.", 
+  array('!link' => $link))."</li></ul>";
+    
+  }
+  else if ($artwork_count < $number_of_allowed) {
+    $path ='sites/default/files/default_images/header-art-artwork-default.jpg';
+    $image = theme_image(array('path'=>$path,
+             'attributes' =>
+             array('class' =>
+             'artist-artwork-missing_image-thumb')));
+
+    $artwork_block .= $image.
+      "<br/>You have not uploaded any artwork images!<ul><li>".
+      "<span class='profile-button'>".l(t("Add Image"), "node/add/artwork",
+  array('query'=> array('field_artwork_artist' => $member['uid'],
+            'destination' => $member['destination'])))."</span>".
+      "</li></ul>";
+  }
+
+  //$artwork_block .= 
+  //  t("After you upload images, it can take up to 12 hours for your ".
+  //    "new images to appear in the public artist search.");
+  $content = array('header'=>t('Artwork'),
+       'body'=>$artwork_block);
+  $body .= artspan_member_dashboard_block_html($content);
+  $body .= "</td></tr></table></div>";
+
+  $ret ['body'] = $body;
+  return $ret;
+}
+
+
+
+/**
+ * ////////////////////////////////////////////////////////////////////////////////////////
+ *  
+ * #2.4 SFOS Studio Events & Guide Images
+ *       _events_block                           // Generate the block
+         _form_alter
+           _studio_event_form_alter
+             _get_non_filtered_group_studios
+         _guide_image_view_field_no_results      // Generate the view's guide image prompts
+ * 
+ * ////////////////////////////////////////////////////////////////////////////////////////
+**/
+
+/**
+ * _events_block()
+ *
+ * Function that defines the Events Block
+ *
+ * @param $member - this is an array that has all information about the user,
+ * contact, particpant records, studio event nodes, and image content types
+ */
+function artspan_member_dashboard_events_block($member) {
+  global $registered;
+  $registered = 0;
+  $ret = array();
+  $body = "";
+  $ret['manager'] = user_access('manage member dashboard');
+  // is event is marked active in Civi?
+  $active = artspan_member_dashboard_active_event();   
+
+  // if not active, don't show anything related to the event, just return
+  if (!$active) {
+    return $ret;
+  } 
+
+  // do event registration dates include today?
+  $open = artspan_member_dashboard_open_registration();
+
+  // this user's participant id
+  $participant_id = $member['os_participant_id'];
+
+  // Membership Status
+  // if this dashboard is for a specific user, get that user
+  //$account = user_load_by_name(arg(1));
+  $account = $ret['manager'] ?  user_load_by_name(arg(1)) : NULL;
+
+  if ($account) { 
+    $accountID = $account->uid;
+  }
+  // otherwise, load the current user
+  else {
+    global $user;
+    $accountID = $user->uid;
+  }
+
+  $contact = civicrm_api3('UFMatch', 'get', array('sequential' => 1, 'uf_id' => $accountID));
+  $contactID = $contact['values'][0]['contact_id'];
+
+  $membership = civicrm_api3('Membership', 'get', array('sequential' => 1, 'contact_id' => $contactID, 'membership_type_id' => 1));
+  $membershipStatusID = $membership['values'][0]['status_id'];
+
+  $membershipStatus = civicrm_api3('MembershipStatus', 'get', array('sequential' => 1, 'id' => $membershipStatusID));
+
+  $membershipName = $membershipStatus['values'][0]['name'];
+  $membershipLabel = $membershipStatus['values'][0]['label'];
+
+  // 1. CHECK MEMBERSHIP STATUS
+  // --------------------------------------------------------------------------------
+  // Confirm that the user is a current member that qualifies to register
+  // Display appropriate prompts if not
+
+  // if registration is open
+  if ($open) {
+
+    // 1.1 NO MEMBERSHIP
+    // Check if the user doesn't have a membership, and prompt them to join
+    if (!$membership) {
+
+      $eventTitle = $member['os_event_title'];
+      $msg = t("Registration for ");
+      $msg .= $eventTitle;
+      $msg .= t(" is now open! Register now for the best benefits at the best value. <br>To begin registration, you must first join us as an Artist Member.");
+      $msg .= "<div>";
+      $msg .= l(t("Join as an Artist here"), "civicrm/contribute/transact?reset=1&id=3");;
+      $msg .= "</div>";
+
+      // $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+      drupal_set_message($msg, 'error');
+      return $ret;
+    }
+
+    // 1.2 EXPIRED MEMBERSHIP
+    //we have a membership that isn't up to date, prompt them to renew
+    if ($membershipLabel != 'Current' &&
+        $membershipLabel != 'Pending'&&
+    	$membershipLabel != 'Grace') {
+
+      $eventTitle = $member['os_event_title'];
+      $msg = t("Registration for ");
+      $msg .= $eventTitle;
+      $msg .= t(" is now open! Register now for the best benefits at the best value. <br>To begin registration, you must first renew your artist membership.");
+      $msg .= "<div>";
+      $msg .= l(t("Renew your artist membership here"), "/civicrm/contribute/transact?reset=1&id=3&cid=1");;
+      $msg .= "</div>";
+
+      // $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+      drupal_set_message($msg, 'error');
+      return $ret;
+    }
+
+    if ($membershipLabel == 'Grace' ) {
+
+      $msg = t("Your artist membership has expired.  <br />Renew today to continue to have access to ArtSpan opportunities and keep your profile page visible to the public.   <br /><a href='https://www.artspan.org/artist-membership'>Click here for a full listing of Artist Benefits.</a>");
+    }
+
+    // 1.3 CURRENT MEMBER, Not yet registered
+    //Otherwise, we can assume that we have a current member, so display them the registration link
+    if (($membershipLabel == 'Current' || 
+         $membershipLabel == 'Pending' ||
+         $membershipLabel == 'Grace') && 
+        (!isset($participant_id) || 
+         !$participant_id && $registered = 0)) {
+
+      $ret['header'] = $member['os_event_title'];
+      $body .= t("You have not yet registered for !title", 
+          array('!title'=>$member['os_event_title']));
+      $body .= "<br/>";
+      $body .= l(t("Register Now!"), "civicrm/event/info", 
+          array('query'=>array('reset'=>1,'id'=>$member['os_event_id'])));
+      $ret['body'] = "<ul><li>".$body."</li></ul>";
+
+      // And display a status message at the top
+      $eventTitle = $member['os_event_title'];
+      $msg = t("Registration for ");
+      $msg .= $eventTitle;
+      $msg .= t(" is now open! Register now for the best benefits at the best value.");
+      $msg .= "<div>";
+      $msg .= l(t("Register Now!"), "civicrm/event/info", 
+          array('query'=>array('reset'=>1,'id'=>$member['os_event_id'])));
+      $msg .= "</div>";
+
+      //$msgBody .= "<br/><div class = 'messages error'>".$msg."</div>";
+
+      drupal_set_message($msg, 'error');
+      return $ret;
+    }
+  }
+
+  // 2. DISPLAY REGISTRATION PROGRESS 
+  // --------------------------------------------------------------------------------
+  // 2.1. Display the next promt(s) in the workflow to help keep the artist on-track
+  // 2.2. Display block with event info
+
+
+  // if artist is not registered yet
+  if (isset($participant_id) || $participant_id && $registered != 0) {
+
+    // Get the relevant progress info
+
+    // number of premier & total weekends this user has registered for
+    $weekend_count = artspan_member_dashboard_get_total_weekends_count();
+    $premier_count = artspan_member_dashboard_get_premier_weekend_count();
+    dpm('weekend' . $weekend_count);
+    dpm('premier' . $premier_count);
+
+    // studio events progress
+    $eventsCreatedSoFar = $member['studio_event_counter'];
+    $numEventsToCreate  = $weekend_count - $eventsCreatedSoFar;
+
+    // Save the weekend count to the _SESSION (#Unclear)
+    $_SESSION['os_weekend_count'] = $weekend_count;
+
+    // 2.1 HEADER PROMPTS
+    // --------------------------------------------------------------------------------
+    // These are tailored to specific situations & types of registration
+    // * Progression is noted above each statement
+   
+    // Registered: 1 (Reg or Premier)
+    // S. Events:  0
+    if ($eventsCreatedSoFar == 0 && $weekend_count == 1) { 
+      $postfix = $weekend_count > 1 ? 's' : '';
+      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listing and (for Premier Registrants) your Guide Image. Let's do that now!");
+      $msg .= "<ul><li>";
+      $msg .= $member['add_studio_event_link'];
+      $msg .= "</li></ul>";
+    }
+
+    // Registered: 2 (Reg or Premier)
+    // S. Events:  0
+    if ($eventsCreatedSoFar == 0 && $weekend_count == 2) {
+      $postfix = $numEventsToCreate > 1 ? 's' : '';
+      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listings for @numEventsToCreate weekend!postfix and (for Premier Registrants) your Guide Image(s). Let's do that now!",
+         array('@numEventsToCreate'=>$numEventsToCreate,
+         '!postfix'=>$postfix));
+      $msg .= "<br>";
+      $msg .= $member['add_studio_event_link'];
+    }
+
+    //User registered for 2 but needs to submit studios for 1 more weekend 
+    // Registered: 2 (Reg or Premier)
+    // S. Events:  1
+    else if ($eventsCreatedSoFar == 1 && $weekend_count == 2) {
+      $msg = "<strong>".t("One Down, One to Go")."</strong><br>";
+      $msg .= t("You selected one of your weekends. Please submit your Studio's event info for @numEventsToCreate more weekend!postfix.",
+         array('@numEventsToCreate'=>$numEventsToCreate,
+         '!postfix'=>$postfix));
+      $msg .= "<br>";
+      $msg .= $member['add_studio_event_link'];
+      $msg .= "<br/>";
+    }
+
+    // Registered: 1 Premier
+    // S. Events:  1
+    if ($premier_count > count($member['guide_images']) && 
+        $premier_count == 1 && 
+        $eventsCreatedSoFar > 0) {
+
+      //Message for next to each studio
+      $msg .= "<strong>".t("Guide Image")."</strong><br/>";
+      $msg .= t("Please upload your guide image(s) by following the prompts below."); 
+    }
+
+    // Registered: 1 Reg + 1 Premier
+    // S. Events:  1-2
+    // G. Images:  0
+    else if ($premier_count > count($member['guide_images']) && 
+             $premier_count == 1 && 
+             count($member['guide_images']) == 0 && 
+             $eventsCreatedSoFar > 1) { 
+
+      //Message for next to each studio
+      $msg .= "<strong>".t("Guide Image")."</strong><br/>";
+      $msg .= t("Please upload your guide image(s).");
+      $msg .= t("IMPORTANT: Uploading an image will designate this weekend as your premier weekend");
+    }
+    
+    // Registered: 2 Premier
+    // S. Events:  1-2
+    // G. Images:  0
+    if ($premier_count > count($member['guide_images']) && 
+        $premier_count == 2 && 
+        isset($member['add_guide_image_link']) && 
+        $eventsCreatedSoFar > 1) {  
+
+      $postfix = count($member['guide_images']) > 1 ? 's' : '';
+      $msg = t("Next, you need to submit your Guide Image!postfix",
+               array('!postfix'=>$postfix));
+
+      $msg .= t('!');
+      $msg .= "</ul>";
+    }
+
+    // Set the brick-red message at the top of the dashboard
+    drupal_set_message($msg, 'error'); 
+
+
+    // 2.2 BLOCK DISPLAY
+    // --------------------------------------------------------------------------------
+    // These display whenever there is info about the event
+
+    // Title for the block
+    $ret['header'] = $member['os_event_title'];
+
+    // Generate body info for the block
+    $body .= "<table><tr><th><h2>Registration Info:</h2></th></tr><tr><td>";
+
+    // Registration Status
+    if ($member['os_weekend_count'] > $member['studio_event_counter']) {
+      $reg_status = t("Awaiting Studio Information");
+    }
+    else {
+      $reg_status = t("Successfully Registered for @title", array('@title'=> $member['os_event_title']));
+    }
+    $body .= "<strong>Status: </strong>$reg_status</td></tr><tr><td>";
+
+    // Registration Type
+    $type = rtrim($member['os_priceset_label'], " - 1");
+    $body .= "<strong>Type:</strong> ".$type."</td></tr></table>";
+
+    // also add the current status message from 2.1 to the block area
+    if ($msg) {
+      $body .= "<br/><div class = 'messages error'>".$msg."</div>";
+    }
+
+    // View that displays studio events & guide images
+    $body .= views_embed_view('studio_event_member_dashboard_block','default', $participant_id);
+    $body .= "</li></ul>";
+
+  }
+
+ 
+  // Commit the body content for this block
+  $ret['body'] = $body;
+
+  return $ret;
+}
+
+/**
+ * _guide_image_view_field_no_results()
+ *
+ * Function called from guide_image_view_field, displays the below prompts 
+ * within the studio information, depending on the user's premier/participating level
+ */
+function artspan_member_dashboard_guide_image_view_field_no_results($view) {
+  $member = $_SESSION['artspan_member'];
+  $arg = $view->args[0];
+  $level = artspan_member_dashboard_get_premier_weekend_count();
+
+  // If the user has no guide image for this event
+  if ($level > count($member['guide_images'])) {
+
+    //User is premier, either with one or two weeks
+    if ($level == 2) { 
+
+      //Message for next to each studio
+      $msg = "<strong>".t("Guide Image")."</strong><br/>";
+      $msg .= t("Premier Artists can upload an image for our printed guide here."); // <br>If you've selected 1 Premier and 1 Participating, please upload an image for the weekend which you'd like to be your premier.<br>");
+      $msg .= "<ul><li>";
+      $msg .= l(t("Add Guide Image"), "node/add/guide-image",
+          array("query"=>
+          array('destination' => $member['destination'],
+          'field_guide_image_studio_event' => $arg)));
+      $msg .= "</ul></li>";
+      
+      $msg = "<div class = 'messages error'>".$msg."</div>";
+    }
+
+    //User signed up for one premier and one participating week
+    elseif ($level == 1) { 
+      //Message for next to each studio
+      $msg = "<strong>".t("Guide Image: Select As Premier Weekend")."</strong><br/>";
+      $msg .= t("If this is the weekend you select as your Premier weekend, please upload an image for the printed guide.<br>");
+      $msg .= "<ul><li>";
+      $msg .= l(t("Add Guide Image"), "node/add/guide-image",
+          array("query"=>
+          array('destination' => $member['destination'],
+          'field_guide_image_studio_event' => $arg)));
+
+      $msg = "<div class = 'messages error'>".$msg."</div>";
+    }
+  }
+    
+  //User is particpating
+  else {
+    $msg = t("You have registered as a Participating SF Open Studios Artist. To upgrade to Premier Registration, please contact ");
+    $msg .= l(t("info@artspan.org."), "mailto:info@artspan.org");
+    //$msg .= $level;
+  }
+
+  
+
+  return $msg;
+}
+
+
+/**
+ * ////////////////////////////////////////////////////////////////////////////////////////
+ *  
+ * #2.5 ???
+ *    _sponsor_block
+ *      _sponsor_block_title
+ *      _sponsor_block_content
+ * 
+ * ////////////////////////////////////////////////////////////////////////////////////////
+**/
+
+/**
+ * Function that defines the Sponsor Block, it displays content from an admin
+ * settings form
+ *
+ * @param $member - this is an array that has all information about the user,
+ * contact, particpant records, studio event nodes, and image content types
+ */
+function artspan_member_dashboard_sponsor_block($member) {
+  $ret = array();
+  $body = "";
+
+  //IF THERE IS NO MEMBERSHIP, THERE WILL BE NO BLOCK
+  if (!isset($member['membership_id']) || !$member['membership_id']) {
+    return $ret;
+  }
+
+  $title = variable_get('artspan_member_dashboard_sponsor_block_title');
+  $body = variable_get('artspan_member_dashboard_sponsor_block_content');
+
+  if ($title && $body) {
+    $ret['body'] = $body;
+    $ret['header'] = $title;
+    
+  }
+    
+  return $ret;
+}
+
+/**              
+ * Implements hook_form_alter(). 
+ */
+function artspan_member_dashboard_form_alter(&$form, &$form_state) {
+
+  if (isset($form['#node_edit_form']) && $form['#node_edit_form'] && 
+      $form['type']['#value'] == 'studio_event') {
+    _artspan_member_dashboard_studio_event_form_alter($form, $form_state);
+  }
+  if (isset($form['#node_edit_form']) && $form['#node_edit_form'] && 
+      $form['type']['#value'] == 'guide_image') {
+    _artspan_member_dashboard_guide_image_form_alter($form, $form_state);
+  }
+  if (isset($form['#node_edit_form']) && $form['#node_edit_form'] && 
+      $form['type']['#value'] == 'artwork') {
+    _artspan_member_dashboard_artwork_form_alter($form, $form_state);
+  }
+
+}
+/**
+ * Function alters teh guide-image form,  actually does nothing for now
+ */
+function _artspan_member_dashboard_guide_image_form_alter(&$form, &$form_state) {
+
+  //no longer does anything, keeping around in case it does
+
+}
+
+/**
+ * Function alters teh artwork node form
+ */
+function _artspan_member_dashboard_artwork_form_alter(&$form, 
+                  &$form_state) {
+  //no longer using this field
+  unset($form['field_artist']);
+
+  //SEE IF WE CAN FIND AN NID, IF SO IT MEANS WE ARE EDIT RATHER THAN CREATE
+  if (isset($form['nid']) && isset($form['nid']['#value']) &&
+      $form['nid']['#value']) {
+    
+    //DON'T NEED THIS NOW, BUT ITS HERE IN CASE
+    //$artwork_nid = $form['nid']['#value'];
+    //$artwork = $artwork_nid ? node_load($artwork_nid) : NULL;
+
+    //unset title as we won't allow it to be edited, can't used the autolabel
+    //as figuring out the title is a little complex
+    unset($form['title']);
+  
+  }
+  //ITS A NEW STUDIO EVENT
+  else {
+    //set title to temp value, it will be set for real in the presave hook
+    $form['title'] = 
+      array(
+      '#type' => 'hidden',
+      '#value' => 'temp title',
+      );
+    
+  }
+}
+
+/**
+ * Function alters teh studio-event form, mostly to receive the participant ID
+ * and decide on whether or not to display the 
+ */
+function _artspan_member_dashboard_studio_event_form_alter(&$form, 
+                 &$form_state) {
+
+  $member = $_SESSION['artspan_member'];
+
+  //FIRST UNSET FIELDS THAT WE SET THE VALUE FOR IN PRESAVE
+  unset($form['field_studioevent_member_dash']);
+  unset($form['field_studioevent_participant_id']);
+  
+  //FETCH ALL THE STUDIO CONTACTS SO WE CAN HAVE OUR DROPDOWN APPEAR THE 
+  //WAY WE WANT
+  $studio_contacts = 
+    artspan_member_dashboard_get_non_filtered_group_studios();
+
+  $options = array();
+  $options['_none'] = t("- Select a value -");
+  foreach($studio_contacts as $id => $display_name) {
+    $options[$id] = $display_name;
+  }
+  $form['field_studioevent_contact'][LANGUAGE_NONE]['#options'] = $options;
+
+  //SEE IF WE CAN FIND AN NID, IF SO IT MEANS WE ARE EDIT RATHER THAN CREATE
+  if (isset($form['nid']) && isset($form['nid']['#value']) &&
+      $form['nid']['#value']) {
+    $studio_event_nid = $form['nid']['#value'];
+    $studio_event = $studio_event_nid ? node_load($studio_event_nid) : NULL;
+
+    //unset title as we won't allow it to be edited, can't used the autolabel
+    //as figuring out the title is a little complex
+    unset($form['title']);
+    
+    //DISPLAY THE MINI BLOCK OF REGISTERSTED STUDIO INFO, COMES FROM A VIEW
+    $text = views_embed_view('studio_event_address_view_field','default', 
+            $studio_event->nid);
+    
+    $link = l("delete", "node/".$studio_event->nid."/delete",
+        array("query"=>array('destination'=>'dashboard')));
+
+    $text .= t("If the address is incorrect for the studio please let us know by emailing us at info@artspan.org. If you need to change your studio information (other than room number) you will need to !delete_link your studio information and re-enter it from your dashboard, and then re-upload your TIFF artwork image for the Guide (if you are a Premier Artist).",  array('!delete_link'=>$link));
+
+    $form['field_studioevent_room_num'][LANGUAGE_NONE]['#prefix'] .= $text;
+
+  }
+  //ITS A NEW STUDIO EVENT
+  else {
+
+    $participant_id = filter_input(INPUT_GET, 'participant_id');
+    if (!$participant_id) {
+      drupal_set_message("Sorry, we can't do that for you. Error Code #343: Missing Participant ID",
+       'error');
+      $dest = filter_input(INPUT_GET, 'destination');
+      $dest = $dest ? $dest : 'dashboard';
+      drupal_goto($dest);
+    }
+    //CHECK TO MAKE SURE THE USER HAS THE ABILITY TO CREATE A STUDIO EVENT
+    //WITH THE PARTICIPANT ID PASSED IN
+    //if the user 'manage member dashboard' permissions skip further validation
+    //if (!user_access('manage member dashboard')) { 
+      //GET PARTICIPANT CONTACT
+      $participant = 
+  artspan_member_dashboard_get_civi_objects('Participant', FALSE, 
+              array('id' => 
+              $participant_id));
+
+      //GET UF_MATCH FROM PARTICIPANT
+      $uf_match = $participant ? 
+  artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, 
+              array('contact_id' => 
+              $participant['contact_id']))
+  : NULL;
+
+      //CHECK UID VERSUS THE GLOBAL UID, IF THEY DON'T MATCH BOOT USER
+      /*global $user;
+      if ($uf_match['uf_id'] != $user->uid) {
+  drupal_set_message("Sorry, we can't do that for you. Error Code #952",
+         'error');
+  $dest = filter_input(INPUT_GET, 'destination');
+  $dest = $dest ? $dest : 'dashboard';
+  drupal_goto($dest);
+      }*/
+
+  //For two users who have different array type
+  if($participant['participant_fee_level'][0] == 'P') {
+    $week_selected = rtrim($participant['participant_fee_level'], " - 1");
+  }
+
+   else if(strpos($participant['participant_fee_level'][0], "SP")) {
+  	$week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
+  	if(strpos($participant['participant_fee_level'][0], "One")) {
+  		$weekend_count = 1;
+  	}
+  	else if(strpos($participant['participant_fee_level'][0], "Two")) {
+  		$weekend_count = 2;
+  	}
+  }
+
+  else {
+    $week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
+  } 
+
+
+      $price_field_value = 
+        artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
+        array('label' => $week_selected)); //$participant['participant_fee_level'][0]));
+
+      $weekend_count_var_name = 'artspan_member_dashboard_weekend_count_'.
+      $price_field_value['id'];
+
+      $weekend_count = $weekend_count ? $weekend_count : variable_get($weekend_count_var_name);
+      $member["os_weekend_count"] = $weekend_count;
+ 
+      $studio_event_count = 
+      db_query("SELECT count(1) from {node} n
+                  INNER JOIN {field_data_field_studioevent_participant_id} p
+                  ON n.vid=p.revision_id
+                  WHERE n.type='studio_event' 
+                  AND p.field_studioevent_participant_id_value=:pid", 
+          array(':pid' => $participant_id))->fetchField();
+
+      if ($studio_event_count >= $weekend_count) {
+        drupal_set_message("Sorry, you have already submitted your studio information.",
+         'error');
+
+        $GLOBALS['sign_up'] = 1;
+        $dest = filter_input(INPUT_GET, 'destination');
+        $dest = $dest ? $dest : 'dashboard';
+        drupal_goto($dest);
+      }
+    }
+
+
+    $form['artspan_member_dashboard_participant_id'] = 
+      array(
+      '#type' => 'hidden',
+      '#value' => $participant_id,
+      );
+    //set title to temp value, it will be set for real in the presave hook
+    $form['title'] = 
+      array(
+      '#type' => 'hidden',
+      '#value' => 'temp title',
+      );
+   // }
+}
+
+
+/**
+ * Function will alter the studio_event node before saving it to make sure
+ * all civi related data is handled correctly.
+ */
+function artspan_member_dashboard_node_presave($node) {
+  civicrm_initialize();
+
+  if ($node->type == 'studio_event') {
+    //find participant id
+    if ($node->nid) {
+      $participant_id = 
+  $node->field_studioevent_participant_id[LANGUAGE_NONE][0]['value'];
+    }
+    else {
+      $participant_id = $node->artspan_member_dashboard_participant_id;
+      $node->field_studioevent_participant_id[LANGUAGE_NONE][0]['value'] =
+  $participant_id;
+    }
+
+    //find Participant record
+    $participant = 
+      artspan_member_dashboard_get_civi_objects('Participant', FALSE, 
+            array('id' => 
+                  $participant_id));
+    
+    $contact = $participant ?
+      artspan_member_dashboard_get_civi_objects('Contact', FALSE, 
+            array('id' => 
+               $participant['contact_id']))
+      : NULL;
+
+    $uf_match = $contact ? 
+      artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, 
+            array('contact_id' => 
+                  $contact['contact_id']))
+      : NULL;
+
+
+    $event = $participant ?
+      artspan_member_dashboard_get_civi_objects('Event', FALSE, 
+            array('id' => 
+                 $participant['event_id']))
+      : NULL;
+  
+    $should_create_new_studio = 
+      artspan_member_dashboard_get_single_field_value($node,
+          'field_studioevent_add_new_studio');
+    $node->field_studioevent_add_new_studio[LANGUAGE_NONE][0]['value'] = 0;
+
+    //if we arent creating a new studio, tryt o find the $studio_contact_id
+    if (!$should_create_new_studio) {
+      //try to fetch the studio contact id form the field
+      $studio_contact_id = 
+  artspan_member_dashboard_get_single_field_value($node, 
+               'field_studioevent_contact',
+              'contact_id');
+
+      //FIXME ME: THERE IS A PROBLEM WITH CONDITIONAL FIELDS AND THE CIVI
+      //CONTACT FIELD WHERE THE VALUE GETS DROPPED BY THE TIME presave HAPPENS.
+      //THEREFORE WE ARE STASHING THE CID IN THE SESSION IN THE validate HOOK 
+      //GRABBING IT HERE.
+      if (isset(
+       $_SESSION['artspan_member_dashboard_studio_event_studio_contact_id'])) {
+      
+  $studio_contact_id = 
+    $_SESSION['artspan_member_dashboard_studio_event_studio_contact_id'];
+        $_SESSION['artspan_member_dashboard_studio_event_studio_contact_id'] =
+    NULL;
+  $node->field_studioevent_contact[LANGUAGE_NONE][0]['contact_id'] =
+    $studio_contact_id;
+      }
+    }
+
+    //get civi contact if the id exists
+    $studio_contact =  isset($studio_contact_id) && $studio_contact_id ?
+      artspan_member_dashboard_get_civi_objects('Contact', FALSE, 
+            array('id' => 
+                  $studio_contact_id))
+      : NULL;
+
+    //get the relationship_type_id for the Studio/Artist relationship
+    $relationship_type_id = 
+      artspan_member_dashboard_get_relationship('Studio Artist of',
+            'Studio of',
+            'Individual',
+            'Organization',
+            NULL,
+            'Group_Studio_Site'
+            );
+
+    //if we have a studio contact, create the relationship.
+    if ($studio_contact) {
+      if ($relationship_type_id) {
+  //see if one exists between studio contact and the artist
+  $relationship = 
+    artspan_member_dashboard_get_civi_objects('Relationship', FALSE, 
+      array('contact_id_b'=> 
+      $studio_contact_id,
+      'relationship_type_id'=>$relationship_type_id)
+                );
+  if (!$relationship) {
+    $parameters = 
+      array(
+      'sequential' => 1,
+      'contact_id_a' => 
+      $contact['contact_id'],
+      'contact_id_b' => $studio_contact_id,
+      'relationship_type_id' => 
+      $relationship_type_id,
+      );
+
+    //if not create a new one
+    $r_result = civicrm_api3('Relationship', 'create', $parameters);
+  }
+      }
+    }
+    else {
+      //build array of the unique parts of field names       
+      $field_suffixes = array(
+            'name',
+            'street',
+            'cross',
+            'city',
+            'zip',
+             );
+      $address = array();
+      foreach($field_suffixes as $suffix) {
+  $field_name = 'field_studioevent_studio_'.$suffix;
+  $address[$suffix] = 
+    artspan_member_dashboard_get_single_field_value($node, $field_name);
+  unset($node->{$field_name});
+  
+      }
+      
+      if (!isset($address['name']) || !$address['name']) {
+  $address['name'] = $address['street'];
+      }
+
+      $create_result = civicrm_api3('Contact', 'create', 
+            array(
+            'sequential' => 1,
+            'organization_name' => 
+            $address['name'],
+            'contact_type' => "Organization",
+            'contact_sub_type' => 
+            "Group_Studio_Site",
+                                          'custom_120' => 1,
+            ));
+
+      if ($create_result && isset($create_result['values']) && 
+    $create_result['values']) {
+  $new_contact_id = $create_result['values'][0]['id'];
+      
+  $node->field_studioevent_contact[LANGUAGE_NONE][0]['contact_id'] =
+    $new_contact_id;
+
+  $add_result = civicrm_api3('Address', 'create', 
+           array(
+           'sequential' => 1,
+           'contact_id' => $new_contact_id,
+           'location_type_id' => 3,
+           'street_address' => 
+           $address['street'],
+           'supplemental_address_1' => 
+           $address['cross'],
+           'city' => $address['city'],
+           'postal_code' => $address['zip'],
+           'state_province_id' => 1004,
+           ));
+
+  //add relationship
+  $parameters = 
+    array(
+    'sequential' => 1,
+    'contact_id_a' => 
+    $contact['contact_id'],
+    'contact_id_b' => $new_contact_id,
+    'relationship_type_id' => 
+    $relationship_type_id,
+    );
+  
+  //if not create a new one
+  $rel_result = civicrm_api3('Relationship', 'create', $parameters);
+
+  //set id and display name in an array for later operations
+  $studio_contact = array (
+         'id' => $rel_result['values'][0]['id'],
+         'display_name' => $address['name'],
+         );
+      }
+    }//done dealing with studio contact
+
+
+    //set contact id field on studio event
+    if ($contact) {
+      $node->field_studioevent_artist_contact[LANGUAGE_NONE][0]['value'] =
+  $participant['contact_id'];
+      
+      $node->field_studioevent_member_dash[LANGUAGE_NONE][0]['url'] =
+  'dashboard/'. $uf_match['uf_id'];
+
+    }
+
+    //set title using artist name
+    $field = 'custom_'.variable_get('artspan_member_dashboard_artist_name');
+    $artist_name = 
+      artspan_member_dashboard_get_civi_objects('Contact', FALSE, 
+            array('id'=> 
+                $participant['contact_id'],
+                  'return'=>$field),
+                  'getvalue');
+
+    $artist_name = $artist_name ? $artist_name : $contact['display_name'];
+    
+    
+    $node->title = $event['title'] . ": " . $artist_name . ": " .
+      $studio_contact['display_name'];  
+
+
+    /**
+       dsm($node, 'my node');
+       dsm($contact, 'contact');
+       dsm($participant, 'part');
+       dsm($event, 'event');
+       dsm($studio_contact, 'studio');
+       dsm($studio_contact_id, 'studo cid');
+       dsm($uf_match, 'match');
+       dsm($node, 'post presave');
+    */
+  }
+
+  //////////////////////////////////////////////////////////////////////
+  //PRESAVE FOR artwork NODES
+  //WE WILL SET THE TITLE AND THE PATH SINCE TOKENS AREN'T ROBUST ENOUGH
+  else if ($node->type == 'artwork') {
+
+    //see if a artist is passed in via the URL
+    $uid = filter_input(INPUT_GET, 'field_artwork_artist');
+
+    //IF WE DIDNT GET THE UID VIA THE URL WE WILL GET IT FROM THE FIELD
+    if (!$uid) {
+      $uid =  
+  artspan_member_dashboard_get_single_field_value($node,
+              'field_artwork_artist',
+              'target_id');
+    }
+
+    //IF WE FOUND AN ARTIST FROM THE FIELD WE WILL GET TEH ARTIST NAME VIA
+    //THE CIVICRM CONTACT
+    if ($uid) {
+      //fetch contact
+      $uf = artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, array('uf_id' => $uid));
+      $contact =  artspan_member_dashboard_get_civi_objects('Contact', FALSE, array('id' => $uf['contact_id']));
+
+      //set title using artist name
+      $field = 'custom_'.variable_get('artspan_member_dashboard_artist_name');
+      $artist_name = 
+      artspan_member_dashboard_get_civi_objects('Contact', FALSE, 
+              array('id'=> 
+              $contact['id'],
+              'return'=>$field),
+              'getvalue');
+      $artist_name = $artist_name ? $artist_name : $contact['display_name'];
+      
+    }
+    //SINCE WE DIDN'T HAVE AN ARTIST, WE WON'T HAVE AN ARTIST NAME, THE WEB
+    //INTERFACE SHOULDN'T ALLOW THIS, ONLY HERE JUST FOR SCRIPTS
+    else {
+      $artist_name = '';
+    }
+
+    //GET TEH VALUE OF THE TITLE FIELD SUBMITTED BY THE USER, THIS WILL BE 
+    //USED TO SET THE REAL BEHIND THE SCENES NODE TITLE WE'LL SET BELOW
+    $artwork_title = artspan_member_dashboard_get_single_field_value($node, 'field_content_title');
+    
+    $artwork_title = $artwork_title ? $artwork_title : "Image";
+
+
+    //SET TEH TITLE ON THE NODE
+    $node->title = $artwork_title;
+
+    
+    //SET THE ALIAS AND STORE AS A GLOBAL SO ITS AVAILABLE IN POST SAVE
+    global $artspan_path_alias;
+    if ($artist_name) {
+      $artspan_path_alias = 
+  "artist/" .urlencode(str_replace(" ", "-", $artist_name)) .
+  "/" . urlencode(str_replace(" ", "-", $artwork_title));
+    }
+    else {
+      $artspan_path_alias = "artist/artwork/" . 
+  urlencode(str_replace(" ", "-", $artwork_title));
+    }
+  }
+}
+  
+
+
+/**
+ *
+ */
+function artspan_member_dashboard_get_relationship($a_to_b, $b_to_a,
+               $a_type, $b_type,
+               $a_sub = NULL, 
+               $b_sub = NULL) {
+  $result = 
+    artspan_member_dashboard_get_civi_objects('RelationshipType', FALSE, 
+                array('name_a_b'=> $a_to_b));
+
+  if ($result) {
+    $relationship_type_id = $result['id'];
+  }
+  else {
+    //if it doesn't exist, create it
+    $parameters = array(
+      'sequential' => 1,
+      'name_a_b' => $a_to_b,
+      'name_b_a' => $b_to_a,
+      'contact_type_a' => $a_type,
+      'contact_type_b' => $b_type
+      );
+
+    if ($a_sub) {
+      $parameters['contact_sub_type_a'] = $a_sub;
+    }
+
+    if ($b_sub) {
+      $parameters['contact_sub_type_b'] = $b_sub;
+    }
+
+    $create_result = civicrm_api3('RelationshipType', 'create', $parameters);
+
+    if ($create_result && isset($create_result['values']) && 
+  $create_result['values']) {
+      $relationship_type_id = $create_result['values'][0]['id'];
+    }
+    else {
+      $relationship_type_id = NULL;
+    }
+  }
+  return $relationship_type_id;
+}
+
+
+
+
+/**
+ * Function will query the contact groups to find all contacts that are currenlty in Group Studio,
+ * and then store their display_name's to an array.
+ */
+function artspan_member_dashboard_get_non_filtered_group_studios() {
+  $studios = array();
+
+  $sql = "SELECT civicrm_contact.id, civicrm_contact.display_name 
+  FROM civicrm_contact
+  JOIN civicrm_group_contact on civicrm_group_contact.contact_id = civicrm_contact.id
+  WHERE civicrm_group_contact.group_id = 2 AND civicrm_group_contact.status LIKE 'Added' AND civicrm_contact.is_deleted = 0";
+
+  $result = db_query($sql);  
+
+  foreach($result as $record) {
+    $studios[$record->id] = $record->display_name;
+  }
+
+    asort($studios);
+    return $studios;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ----------------------------------------------------------------------------------------
+ *
+ * #3 - Utility Functions
+ *    - Called frequently by other functions to serve a simple, but common purpose
+ * 
+ *      _block_html
+ *      _active_event
+ *      _get_civi_objects
+ *      _get_single_field_value
+ *      _get_premier_weekend_count                  #UpdateEachYear
+ * 
+ * ----------------------------------------------------------------------------------------
+**/
+
+/**
+ * _block_html()
+ *
+ * Creates the html for a dashboard block, this will use the <fieldset> tag so
+ * we can take advantage of the <legend> tag
+ * 
+ * @param $header will use the legend tag on fieldset to display block header
+ * @param $content will put the block content in a p tag within the fieldset
+ * @return $html the block html
+ */
+function artspan_member_dashboard_block_html($content) {
+  $html = "";
+  if ($content) {
+    $html = 
+      "<fieldset class='artspan-block-fieldset'>
+         <legend class='artspan-block-legend'>".$content['header']."</legend>
+         <div class='artspan-block-content'>".$content['body']."</div>
+       </fieldset>";
+  }
+  return $html;
+}
+
+
+/**
+ * _active_event()
+ *
+ * Function will check to see if there is an active event on CiviCRM
+ * Used to provide proper dashboard prompts, for either during event registration
+ * or not during event registration.
+ * Called by: _events_block() 
+ *            _profile_block()
+ */
+function artspan_member_dashboard_active_event() {
+
+  date_default_timezone_set('America/Los_Angeles');
+  $date = date('Y-m-d H:i:s');
+  $active_event = array();
+
+  civicrm_initialize();
+  $prefix = 'artspan_member_dashboard_';
+  $current_value = variable_get($prefix.'os_event_id', 0);
+
+  $active_event = civicrm_api3('Event', 'get', array(
+                    'end_date' => array('>=' => $date),
+                    'id' => $current_value,
+                    'is_active' => array('LIKE' => '1')
+  ));
+
+  if($active_event && isset($active_event['values']) && $active_event['values']) {
+    return true;
+  }
+
+  else {
+    return false;
+  }
+}
+
+/**
+ * _open_registration()
+ *
+ * Function will check to see if registration is open for SFOS
+ * Used to provide proper dashboard prompts, for either during event registration
+ * or not during event registration.
+ * Called by: 
+ */
+function artspan_member_dashboard_open_registration() {
+  date_default_timezone_set('America/Los_Angeles');
+  $date = date('Y-m-d H:i:s');
+  $open_registration = array();
+
+  civicrm_initialize();
+  $prefix = 'artspan_member_dashboard_';
+  $current_value = variable_get($prefix.'os_event_id', 0);
+
+  $open_registration = civicrm_api3('Event', 'get', array(
+                    'end_date' => array('>=' => $date),
+                    'registration_end_date' => array('>=' => $date),
+                    'id' => $current_value,
+                    'is_active' => array('LIKE' => '1')
+  ));
+
+  if($open_registration && isset($open_registration['values']) && $open_registration['values']) {
+    return true;
+  }
+
+  else {
+    return false;
+  }
+}
+
+
+/**
+ * _get_civi_objects()
+ *
+ * Function will be passed in an Civicrm Object type and an array of query
+ * attributes
+ */
+function artspan_member_dashboard_get_civi_objects($type, $multiple, $args, $action='get') {
+
+  $args['sequential'] = 1;
+  $result = civicrm_api3($type, $action, $args);
+
+  if ($action=='getvalue') {
+    return $result;
+  }
+
+  if ($result && isset($result['values']) && $result['values']) {
+    if ($multiple) {
+      return $result['values'];
+    }
+    else {
+      return $result['values'][0];
+    }
+  }
+  else {
+    if ($multiple) {
+      return array();
+    }
+    else {
+      return NULL;
+    }
+  }
+}
+
+
+/**
+ * _get_single_field_value()
+ * 
+ * Function will be return the value from a node without any undefined
+ * index warnings
+ */
+function artspan_member_dashboard_get_single_field_value($node, $field_name,
+               $index = 'value') {
+  if (isset($node->{$field_name})) {
+    $field = $node->{$field_name};
+    if (isset($field[LANGUAGE_NONE]) && isset($field[LANGUAGE_NONE][0])) {
+      return $field[LANGUAGE_NONE][0][$index];
+    }
+  }
+  return NULL;
+}
+
+
+/**
+ * _get_premier_weekend_count()
+ *
+ * Determines what pricing levels equate to what level of access an artist is given
+
+ * #UpdateEachYear
+
+ * Function called from _guide_image_view_field_no_result()
+ * To return what level the participant is registered at.
+
+ * Returns: Number of Premier weekends user is registered for
+ */
+
+function artspan_member_dashboard_get_premier_weekend_count() {
+  $member = $_SESSION['artspan_member'];
+  $participant_id = $member['os_participant_id'];
+  $participant = artspan_member_dashboard_get_civi_objects('Participant', FALSE, array('id' => $participant_id));
+
+  //GET UF_MATCH FROM PARTICIPANT
+  $uf_match = $participant ? 
+  artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, array('contact_id' => $participant['contact_id'])) : NULL;
+
+  $fee_level_early   = rtrim($participant['participant_fee_level'][0], " - 1");
+    //Second fee level for 2 users who it has a different array type for...
+  $fee_level_regular = rtrim($participant['participant_fee_level'], " - 1");
+
+
+  //User registered for 1 premier, 1 particpating
+  if ((strpos($fee_level_early, "Premier") !== false && strpos($fee_level_early, "Participating")!== false) 
+   || (strpos($fee_level_regular, "Premier") !== false && strpos($fee_level_regular, "Participating")!== false)) {
+
+    $level = 1;
+  }
+
+  //User registered for 1 or 2 premier
+  else if ((strpos($fee_level_early, "Premier") !== false) 
+        || (strpos($fee_level_regular, "Premier") !== false)) {
+
+    if ((strpos($fee_level_early, "1") !== false || strpos($fee_level_early, "One") !== false) 
+     || (strpos($fee_level_regular, "1") !== false || strpos($fee_level_regular, "One") !== false)) {
+
+      $level = 1;
+    }
+
+    if ((strpos($fee_level_early, "2") !== false || strpos($fee_level_early, "Two") !== false) 
+     || (strpos($fee_level_regular, "2") !== false || strpos($fee_level_regular, "Two") !== false)) {
+      $level = 2;
+    }
+  }
+
+    //User registered for 1 or 2 participating
+  else {
+    $level = 0;
+  }
+
+  $_SESSION['os_premium_count'] = $level;
+
+  return $level;
+}
+
+
+
+
+
+
+
+
+
+
+
+/**
+ * ----------------------------------------------------------------------------------------
+ *
+ * #4 - Unknown/Legacy Inherited from Open Flows
+ *    - Several functions here have no explicit calling function (at least within this module)
+
+ *      _node_validate
+ *      _node_presave
+ *      _node_update & _node_insert 
+ *        _node_post_save
+ *      _guide_image_view_field_no_results   - #NoCallingFunction
+ *      _init                                - #NoCallingFunction
+ *      _civicrm_post
+ *      _updated_artwork_nodes
+ * 
+ * ----------------------------------------------------------------------------------------
+**/
+
+
+
+/**
+ * _node_validate()
+ * 
+ * Node API validate hook, because of a conditional field civicrm reference 
+ * field issue we will grab the value of the studio contact dropdown value 
+ * under the correct conditions and stash it in the function for the presave 
+ * to pick up.
+**/
+function artspan_member_dashboard_node_validate($node) {
+  $studio_contact_id = 
+    artspan_member_dashboard_get_single_field_value($node, 
+               'field_studioevent_contact',
+                'contact_id');
+
+  //FIXME ME: THERE IS A PROBLEM WITH CONDITIONAL FIELDS AND THE CIVI
+  //CONTACT FIELD WHERE THE VALUE GETS DROPPED BY THE TIME presave HAPPENS.
+  //THEREFORE WE ARE STASHING THE CID IN THE SESSION HERE AND USING IT LATER
+  //IN THE presave HOOK 
+  $_SESSION['artspan_member_dashboard_studio_event_studio_contact_id'] =
+    $studio_contact_id;
+}
+
+
+/**
+ * _node_update()
+ * Calls _node_post_save
+**/
+function artspan_member_dashboard_node_update($node) {
+  if ($node->type == 'artwork') {
+    artspan_member_dashboard_node_post_save($node);
+  }
+}
+
+
+/**
+ * _node_insert()
+ * Calls _node_post_save
+**/
+function artspan_member_dashboard_node_insert($node) {
+  if ($node->type == 'artwork') {
+    artspan_member_dashboard_node_post_save($node);
+  }
+}
+
+
+/**
+ * _node_post_save()
+ * Set the path alias for a Guide Image node (called by _node_insert and _node_update)
+**/
+function artspan_member_dashboard_node_post_save($node) {
+  global $artspan_path_alias;
+
+  //SEE IF A CURRENT ALIAS EXISTS FOR THE NODE
+  $alias = drupal_get_path_alias("node/".$node->nid);
+
+  //IF THE ALIAS EXISTS DELETE IT SO WE CAN ADD A NEW ONE
+  if ($alias) {
+    $path = path_load(array('source' => "node/".$node->nid));
+    path_delete($path['pid']);
+  }
+  
+  //CREATE PATH ARRAY FOR SETTING THE ALIAS
+  $new_path = array('source'=> "node/".$node->nid,
+        'alias' => $artspan_path_alias);
+
+  //SET THE ALIAS
+  path_save($new_path);
+}
+
+
+/**
+ * _init()
+ * 
+ * Function currently unclear
+**/
+function artspan_member_dashboard_init() {
+  global $user;
+  $var_name = "artspan_post_openstudios_registration_goto_".$user->uid;
+  $should_goto = variable_get($var_name);
+  if ($should_goto) {
+    variable_set($var_name, FALSE);
+    watchdog('artspan_member_dashboard',"found variable: ".$var_name, NULL, WATCHDOG_INFO);
+    drupal_goto("dashboard");
+  }
+}
+
+
+/**
+ * _civicrm_post()
+ * 
+ * Implmenting civi hook civicrm_post
+**/
+function artspan_member_dashboard_civicrm_post($op, $objectName, $objectId, &$objectRef) {
+  
+  if ($objectName == 'Participant' && $op=="create") {
+    if ($objectRef->event_id == variable_get('artspan_member_dashboard_os_event_id')) {
+
+      global $user;
+      if ($user->uid) {
+        $var_name = "artspan_post_openstudios_registration_goto_".$user->uid;
+        variable_set($var_name, TRUE);
+        watchdog('artspan_member_dashboard', "setting variable ".$var_name, NULL, WATCHDOG_INFO);
+      }
+    } 
+  }
+}
+
+
+/**
+ * Function will run through all artist nodes, correclty setting title and 
+ * artist
+**/
+function artspan_member_dashboard_updated_artwork_nodes() {
+  set_time_limit(0);
+
+  $results = db_query("SELECT nid from {node} where type='artwork'");
+  $counter = 0;
+  while ($result = $results->fetchObject()) {
+    if ($counter > 100) {
+      //break;
+    }
+    $counter ++;
+
+    $artwork = node_load($result->nid);
+
+    $old_artist = 
+      artspan_member_dashboard_get_single_field_value($artwork, 
+                  'field_artist',
+                  'uid');
+    $new_artist = 
+    artspan_member_dashboard_get_single_field_value($artwork, 
+                'field_artwork_artist',
+                'target_id');
+
+    if ($old_artist && $old_artist != $new_artist) {
+      $artwork->field_artwork_artist[LANGUAGE_NONE][0]['target_id'] = 
+  $old_artist;
+      node_save($artwork);
+    }
+    else {
+      //node_save($artwork);
+    }
+  }
+
+  dsm('processed ' . $counter . ' artwork images');
+}

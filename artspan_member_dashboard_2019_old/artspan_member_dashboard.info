@@ -1,0 +1,8 @@
+name = Artspan Member Dashboard
+description = Provides all the functionality for the Artspan Member Dashboard
+package = Artspan
+stylesheets[all][] = artspan_member_dashboard.css
+
+core = 7.x
+php = 5.2
+
