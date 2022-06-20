@@ -517,14 +517,15 @@ function artspan_member_dashboard_get_price_set_values() {
   $result = civicrm_api3('PriceFieldValue', 'get', array(
                'sequential' => 1,
                'options' =>
-               array('limit'=>200),
+               array('limit' => 10000),
                ));
   if ($result && isset($result['values']) && $result['values']) {
     foreach ($result['values'] as $value) {
       $price_set_values[$value['id']] = $value['label'];
     }
   }
-  return $price_set_values;
+
+  return array_slice($price_set_values, -200, 200, TRUE);
 }
 
 /**
@@ -1611,8 +1612,6 @@ function artspan_member_dashboard_events_block($member) {
     // number of premier & total weekends this user has registered for
     $weekend_count = artspan_member_dashboard_get_total_weekends_count();
     $premier_count = artspan_member_dashboard_get_premier_weekend_count();
-    dpm('weekend' . $weekend_count);
-    dpm('premier' . $premier_count);
 
     // studio events progress
     $eventsCreatedSoFar = $member['studio_event_counter'];
