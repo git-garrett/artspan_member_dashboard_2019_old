@@ -652,13 +652,20 @@ function artspan_member_dashboard_get_total_weekends_count() {
   	}
   }
   else {
-    $week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
+    $week_selected = is_array($participant['participant_fee_level']) ? rtrim($participant['participant_fee_level'][0], " - 1") : rtrim($participant['participant_fee_level'], " - 1");
   }
+
+  $priceSetId = artspan_member_dashboard_get_price_set_by_event($participant['event_id']);
+
+  // Get priceFields by priceSetId
+  $priceFieldId = artspan_member_dashboard_get_civi_objects('PriceField', FALSE,
+    array('price_set_id' => $priceSetId,
+      'label' => $week_selected,
+      'is_active' => 1));
 
   $price_field_value =
   artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
-     array('label' =>  $week_selected));
-  //$participant['participant_fee_level'][0]));
+     array('price_field_id' =>  $priceFieldId['id']));
 
   $weekend_count_var_name= 'artspan_member_dashboard_weekend_count_'.
   $price_field_value['id'];
@@ -682,6 +689,29 @@ function artspan_member_dashboard_get_total_weekends_count() {
   $finished = false;
    }
   return $finished;**/
+}
+
+/**
+ * _get_price_set_by_event()
+ *
+ * @param $eventId - Civi EventId
+ *
+ * Description: Function that returns Civi PriceSetId for specific eventId
+ *
+ * Returns:     PriceSetId
+ *
+ **/
+function artspan_member_dashboard_get_price_set_by_event($eventId) {
+  $dao = new CRM_Price_DAO_PriceSetEntity();
+  $dao->entity_table = 'civicrm_event';
+  $dao->entity_id = $eventId;
+  $dao->find();
+
+  while ($dao->fetch()) {
+    $priceSetIds[] = $dao->price_set_id;
+  }
+
+  return reset($priceSetIds);
 }
 
 /**
@@ -1988,34 +2018,7 @@ function _artspan_member_dashboard_studio_event_form_alter(&$form,
   drupal_goto($dest);
       }*/
 
-  //For two users who have different array type
-  if($participant['participant_fee_level'][0] == 'P') {
-    $week_selected = rtrim($participant['participant_fee_level'], " - 1");
-  }
-
-   else if(strpos($participant['participant_fee_level'][0], "SP")) {
-  	$week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
-  	if(strpos($participant['participant_fee_level'][0], "One")) {
-  		$weekend_count = 1;
-  	}
-  	else if(strpos($participant['participant_fee_level'][0], "Two")) {
-  		$weekend_count = 2;
-  	}
-  }
-
-  else {
-    $week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
-  }
-
-
-      $price_field_value =
-        artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
-        array('label' => $week_selected)); //$participant['participant_fee_level'][0]));
-
-      $weekend_count_var_name = 'artspan_member_dashboard_weekend_count_'.
-      $price_field_value['id'];
-
-      $weekend_count = $weekend_count ? $weekend_count : variable_get($weekend_count_var_name);
+      $weekend_count = artspan_member_dashboard_get_total_weekends_count();
       $member["os_weekend_count"] = $weekend_count;
 
       $studio_event_count =
