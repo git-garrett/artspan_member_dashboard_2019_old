@@ -622,74 +622,95 @@ function artspan_member_dashboard_page() {
  *
 **/
 function artspan_member_dashboard_get_total_weekends_count() {
+  return artspan_member_dashboard_get_weekends_count('weekend');
+}
 
+/**
+ * _get_premier_weekend_count()
+ *
+ * Determines what pricing levels equate to what level of access an artist is given
+ *
+ * Returns: Number of Premier weekends user is registered for
+ */
+function artspan_member_dashboard_get_premier_weekend_count() {
+  return artspan_member_dashboard_get_weekends_count('premium');
+}
+
+
+/**
+ * _get_weekends_count($type)
+ *
+ * @param string $type - only 'weekend' or 'premium'
+ *
+ * Get the variable 'artspan_member_dashboard_weekend_count_ID'
+ * or 'artspan_member_dashboard_premium_count_ID'
+ *
+ * These variables are set on the page /admin/config/artspan_member_dashboard
+ * (Open Studios Price Set Configuration) section
+ *
+ * Returns: Number of Regular or Premier weekends user is registered for
+ */
+function artspan_member_dashboard_get_weekends_count(string $type) {
   $member = $_SESSION['artspan_member'];
   $participant_id = $member['os_participant_id'];
   $participant =
-  artspan_member_dashboard_get_civi_objects('Participant', FALSE,
-              array('id' =>
-              $participant_id));
+    artspan_member_dashboard_get_civi_objects('Participant', FALSE,
+      array('id' => $participant_id));
 
-  //GET UF_MATCH FROM PARTICIPANT
-  $uf_match = $participant ?
-  artspan_member_dashboard_get_civi_objects('UFMatch', FALSE,
-              array('contact_id' =>
-              $participant['contact_id'])): NULL;
+  $fee_level = is_array($participant['participant_fee_level']) ?
+    rtrim($participant['participant_fee_level'][0], " - 1") :
+    rtrim($participant['participant_fee_level'], " - 1");
 
-  //For two users who have different array type
-  if($participant['participant_fee_level'][0] == 'P') {
-    $week_selected = rtrim($participant['participant_fee_level'], " - 1");
-  }
-  else if(strpos($participant['participant_fee_level'][0], "SP")) {
-  	$week_selected = rtrim($participant['participant_fee_level'][0], " - 1");
-  	if(strpos($participant['participant_fee_level'][0], "One")) {
-  		$member['os_weekend_count'] = 1;
-  		return $member['os_weekend_count'];
-  	}
-  	else if(strpos($participant['participant_fee_level'][0], "Two")) {
-  		$member['os_weekend_count'] = 2;
-  		return $member['os_weekend_count'];
-  	}
-  }
-  else {
-    $week_selected = is_array($participant['participant_fee_level']) ? rtrim($participant['participant_fee_level'][0], " - 1") : rtrim($participant['participant_fee_level'], " - 1");
+  $weekend_count = 0;
+
+  $price_field_value_id = artspan_member_dashboard_get_price_field_value_id($participant['event_id'], $fee_level);
+  if ($price_field_value_id) {
+    $weekend_count_var_name = 'artspan_member_dashboard_' . $type . '_count_' . $price_field_value_id;
+    $weekend_count = variable_get($weekend_count_var_name);
   }
 
-  $priceSetId = artspan_member_dashboard_get_price_set_by_event($participant['event_id']);
+  $member_count_var_name = 'os_' . $type . '_count';
+  $member[$member_count_var_name] = $weekend_count;
+  $_SESSION[$member_count_var_name] = $weekend_count;
+
+  return $weekend_count;
+}
+
+
+/**
+ * _get_price_field_value_id(int $event_id, string $fee_level)
+ *
+ * @param int $event_id - Civi EventId
+ * @param string $fee_level - Civi Participant fee level
+ *
+ * Description: Function that returns Civi price_field_value_id
+ * for specific $event_id by $fee_level
+ *
+ * Returns:     price_field_value_id
+ *
+ **/
+function artspan_member_dashboard_get_price_field_value_id(int $event_id, string $fee_level) {
+  $priceSetId = artspan_member_dashboard_get_price_set_by_event($event_id);
 
   // Get priceFields by priceSetId
-  $priceFieldId = artspan_member_dashboard_get_civi_objects('PriceField', FALSE,
+  $priceFields = artspan_member_dashboard_get_civi_objects('PriceField', TRUE,
     array('price_set_id' => $priceSetId,
-      'label' => $week_selected,
       'is_active' => 1));
 
-  $price_field_value =
-  artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
-     array('price_field_id' =>  $priceFieldId['id']));
+  foreach ($priceFields as $priceField) {
+    $price_field_value =
+      artspan_member_dashboard_get_civi_objects('PriceFieldValue', FALSE,
+        array('price_field_id' =>  $priceField['id'],
+              'label' => $fee_level));
 
-  $weekend_count_var_name= 'artspan_member_dashboard_weekend_count_'.
-  $price_field_value['id'];
-
-  $weekend_count = variable_get($weekend_count_var_name);
-  $member['os_weekend_count'] = $weekend_count;
-  $studio_event_count =
-  db_query("SELECT count(1) from {node} n
-            INNER JOIN {field_data_field_studioevent_participant_id} p
-            ON n.vid=p.revision_id
-            WHERE n.type='studio_event' 
-            AND p.field_studioevent_participant_id_value=:pid",
-            array(':pid' => $participant_id))->fetchField();
-
-  return $member['os_weekend_count'];
-
-  /** if ($studio_event_count >= $weekend_count) {
-   $finished = true;
+    if ($price_field_value) {
+      return $price_field_value['id'];
+    }
   }
-  else {
-  $finished = false;
-   }
-  return $finished;**/
+
+  return NULL;
 }
+
 
 /**
  * _get_price_set_by_event()
@@ -2593,67 +2614,6 @@ function artspan_member_dashboard_get_single_field_value($node, $field_name,
     }
   }
   return NULL;
-}
-
-
-/**
- * _get_premier_weekend_count()
- *
- * Determines what pricing levels equate to what level of access an artist is given
-
- * #UpdateEachYear
-
- * Function called from _guide_image_view_field_no_result()
- * To return what level the participant is registered at.
-
- * Returns: Number of Premier weekends user is registered for
- */
-
-function artspan_member_dashboard_get_premier_weekend_count() {
-  $member = $_SESSION['artspan_member'];
-  $participant_id = $member['os_participant_id'];
-  $participant = artspan_member_dashboard_get_civi_objects('Participant', FALSE, array('id' => $participant_id));
-
-  //GET UF_MATCH FROM PARTICIPANT
-  $uf_match = $participant ?
-  artspan_member_dashboard_get_civi_objects('UFMatch', FALSE, array('contact_id' => $participant['contact_id'])) : NULL;
-
-  $fee_level_early   = rtrim($participant['participant_fee_level'][0], " - 1");
-    //Second fee level for 2 users who it has a different array type for...
-  $fee_level_regular = rtrim($participant['participant_fee_level'], " - 1");
-
-
-  //User registered for 1 premier, 1 particpating
-  if ((strpos($fee_level_early, "Premier") !== false && strpos($fee_level_early, "Participating")!== false)
-   || (strpos($fee_level_regular, "Premier") !== false && strpos($fee_level_regular, "Participating")!== false)) {
-
-    $level = 1;
-  }
-
-  //User registered for 1 or 2 premier
-  else if ((strpos($fee_level_early, "Premier") !== false)
-        || (strpos($fee_level_regular, "Premier") !== false)) {
-
-    if ((strpos($fee_level_early, "1") !== false || strpos($fee_level_early, "One") !== false)
-     || (strpos($fee_level_regular, "1") !== false || strpos($fee_level_regular, "One") !== false)) {
-
-      $level = 1;
-    }
-
-    if ((strpos($fee_level_early, "2") !== false || strpos($fee_level_early, "Two") !== false)
-     || (strpos($fee_level_regular, "2") !== false || strpos($fee_level_regular, "Two") !== false)) {
-      $level = 2;
-    }
-  }
-
-    //User registered for 1 or 2 participating
-  else {
-    $level = 0;
-  }
-
-  $_SESSION['os_premium_count'] = $level;
-
-  return $level;
 }
 
 
