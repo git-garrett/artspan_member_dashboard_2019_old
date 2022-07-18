@@ -977,6 +977,10 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
     $ret['os_participant'] = $result['values'][0];
     $ret['os_participant_id'] = $result['values'][0]['participant_id'];
 
+    $ret['os_priceset_label'] = is_array($result['values'][0]['participant_fee_level']) ?
+      $result['values'][0]['participant_fee_level'][0] :
+      $result['values'][0]['participant_fee_level'];
+
     $ret['os_weekend_count'] = artspan_member_dashboard_get_total_weekends_count();
     $ret['os_premium_count'] = artspan_member_dashboard_get_premier_weekend_count();
   }
