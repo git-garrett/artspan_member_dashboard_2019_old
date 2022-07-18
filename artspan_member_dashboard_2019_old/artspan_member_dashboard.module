@@ -1956,6 +1956,8 @@ function _artspan_member_dashboard_studio_event_form_alter(&$form,
     $options[$id] = $display_name;
   }
   $form['field_studioevent_contact'][LANGUAGE_NONE]['#options'] = $options;
+  $node = $form_state['node'];
+  $form['field_studioevent_contact'][LANGUAGE_NONE]['#default_value'] = $node->field_studioevent_contact[LANGUAGE_NONE][0]['contact_id'];
 
   //SEE IF WE CAN FIND AN NID, IF SO IT MEANS WE ARE EDIT RATHER THAN CREATE
   if (isset($form['nid']) && isset($form['nid']['#value']) &&
