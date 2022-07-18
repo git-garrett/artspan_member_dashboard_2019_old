@@ -977,34 +977,8 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
     $ret['os_participant'] = $result['values'][0];
     $ret['os_participant_id'] = $result['values'][0]['participant_id'];
 
-    //For two users with othe type of array
-    if($result['values'][0]['participant_fee_level'][0] == 'P') {
-      $ret['os_priceset_label'] = $result['values'][0]['participant_fee_level'];
-    }
-    else {
-      $ret['os_priceset_label'] = $result['values'][0]['participant_fee_level'][0];
-    }
-
-    $result2 = civicrm_api3('PriceFieldValue', 'get',
-         array(
-         'sequential' => 1,
-         'label' => $ret['os_priceset_label'],
-         ));
-
-
-    if ($result2
-      && isset($result2['values'])
-      && $result2['values']
-      && $result2['values'][0]['id'] !== NULL) {
-
-      $ret['os_priceset_field_id'] = $result2['values'][0]['id'];
-      $premium_count_var_name ='artspan_member_dashboard_premium_count_' . $ret['os_priceset_field_id'];
-      $weekend_count_var_name= 'artspan_member_dashboard_weekend_count_' . $ret['os_priceset_field_id'];
-
-      $ret['os_premium_count'] = variable_get($premium_count_var_name,0);
-      $ret['os_weekend_count'] = variable_get($weekend_count_var_name,0);
-
-    }
+    $ret['os_weekend_count'] = artspan_member_dashboard_get_total_weekends_count();
+    $ret['os_premium_count'] = artspan_member_dashboard_get_premier_weekend_count();
   }
 
   //IF WE HAVE A PARTICIPANT, GET STUDIO EVENTS AND THEIR GUIDE IMAGES
