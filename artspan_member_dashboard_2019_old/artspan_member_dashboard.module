@@ -2192,16 +2192,18 @@ function artspan_member_dashboard_node_presave($node) {
   $address['name'] = $address['street'];
       }
 
-      $create_result = civicrm_api3('Contact', 'create',
-            array(
+      if ($address['name']) {
+        $create_result = civicrm_api3('Contact', 'create',
+          array(
             'sequential' => 1,
             'organization_name' =>
-            $address['name'],
+              $address['name'],
             'contact_type' => "Organization",
             'contact_sub_type' =>
-            "Group_Studio_Site",
-                                          'custom_120' => 1,
-            ));
+              "Group_Studio_Site",
+            'custom_120' => 1,
+          ));
+      }
 
       if ($create_result && isset($create_result['values']) &&
     $create_result['values']) {
