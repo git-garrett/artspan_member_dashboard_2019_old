@@ -1979,6 +1979,9 @@ function _artspan_member_dashboard_studio_event_form_alter(&$form,
   else {
 
     $participant_id = filter_input(INPUT_GET, 'participant_id');
+    if (!$participant_id && $member['os_participant_id']) {
+      $participant_id = $member['os_participant_id'];
+    }
     if (!$participant_id) {
       drupal_set_message("Sorry, we can't do that for you. Error Code #343: Missing Participant ID",
        'error');
