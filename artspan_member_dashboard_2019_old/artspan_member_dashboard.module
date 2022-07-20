@@ -1792,7 +1792,7 @@ function artspan_member_dashboard_guide_image_view_field_no_results($view) {
     
   //User is particpating
   else {
-    $msg = t("You have registered as a Participating SF Open Studios Artist. To upgrade to Premier Registration, please contact ");
+    $msg = t("Thank you for registering for SF Open Studios. ArtSpan will contact you by email when it is time to upload your Online Guide image. For questions, email ");
     $msg .= l(t("info@artspan.org."), "mailto:info@artspan.org");
     //$msg .= $level;
   }
