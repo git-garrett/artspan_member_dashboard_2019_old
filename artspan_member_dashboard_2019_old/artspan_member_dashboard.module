@@ -1658,7 +1658,7 @@ function artspan_member_dashboard_events_block($member) {
     // S. Events:  0
     if ($eventsCreatedSoFar == 0 && $weekend_count == 1) {
       $postfix = $weekend_count > 1 ? 's' : '';
-      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listing and (for Premier Registrants) your Guide Image. Let's do that now!");
+      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listing and your Guide Image. Let's do that now!");
       $msg .= "<ul><li>";
       $msg .= $member['add_studio_event_link'];
       $msg .= "</li></ul>";
@@ -1668,7 +1668,7 @@ function artspan_member_dashboard_events_block($member) {
     // S. Events:  0
     if ($eventsCreatedSoFar == 0 && $weekend_count == 2) {
       $postfix = $numEventsToCreate > 1 ? 's' : '';
-      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listings for @numEventsToCreate weekend!postfix and (for Premier Registrants) your Guide Image(s). Let's do that now!",
+      $msg = t("Thank you for your payment. To complete your registration, you must submit your SF Open Studios Listings for @numEventsToCreate weekend!postfix and your Guide Images. Let's do that now!",
          array('@numEventsToCreate'=>$numEventsToCreate,
          '!postfix'=>$postfix));
       $msg .= "<br>";
