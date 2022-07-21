@@ -1722,7 +1722,7 @@ function artspan_member_dashboard_events_block($member) {
         $eventsCreatedSoFar > 1) {
 
       $postfix = count($member['guide_images']) > 1 ? 's' : '';
-      $msg = t("Next, you need to submit your Printed Guide Image!postfix",
+      $msg = t("Next, you need to scroll down and submit your Printed Guide Image!postfix",
                array('!postfix'=>$postfix));
 
       $msg .= t('!');
