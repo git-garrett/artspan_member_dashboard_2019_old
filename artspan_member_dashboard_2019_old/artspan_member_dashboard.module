@@ -1696,7 +1696,7 @@ function artspan_member_dashboard_events_block($member) {
 
       //Message for next to each studio
       $msg .= "<strong>".t("Guide Image")."</strong><br/>";
-      $msg .= t("Please upload your guide image(s) by following the prompts below.");
+      $msg .= t("Please upload an artwork image for the Printed Guide.");
     }
 
     // Registered: 1 Reg + 1 Premier
@@ -1709,7 +1709,7 @@ function artspan_member_dashboard_events_block($member) {
 
       //Message for next to each studio
       $msg .= "<strong>".t("Guide Image")."</strong><br/>";
-      $msg .= t("Please upload your guide image(s).");
+      $msg .= t("Please upload an artwork image for the Printed Guide.");
       $msg .= t("IMPORTANT: Uploading an image will designate this weekend as your premier weekend");
     }
 
@@ -1722,7 +1722,7 @@ function artspan_member_dashboard_events_block($member) {
         $eventsCreatedSoFar > 1) {
 
       $postfix = count($member['guide_images']) > 1 ? 's' : '';
-      $msg = t("Next, you need to submit your Guide Image!postfix",
+      $msg = t("Next, you need to submit your Printed Guide Image!postfix",
                array('!postfix'=>$postfix));
 
       $msg .= t('!');
