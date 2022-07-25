@@ -1696,7 +1696,7 @@ function artspan_member_dashboard_events_block($member) {
 
       //Message for next to each studio
       $msg .= "<strong>".t("Guide Image")."</strong><br/>";
-      $msg .= t("Please upload an artwork image for the Printed Guide.");
+      $msg .= t("Please upload an artwork image below.");
     }
 
     // Registered: 1 Reg + 1 Premier
