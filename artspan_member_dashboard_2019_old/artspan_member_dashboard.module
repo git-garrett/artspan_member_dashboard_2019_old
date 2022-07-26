@@ -1052,19 +1052,15 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
       else {
         $wrapper = entity_metadata_wrapper('node', $studio_event);
 
+        $studio_event_label = '';
         $weekend = $wrapper->field_studioevent_weekend->value();
 
         if ($weekend) {
           $weekend_label = $wrapper->field_studioevent_weekend->label();
           $field_name = 'field_studioevent_weekend'.$weekend.'_hood';
           $neighborhood = $wrapper->{$field_name}->label();
+          $studio_event_label = $weekend_label;
         }
-
-        $cid = $wrapper->field_studioevent_contact->value();
-
-        $studio_contact = artspan_member_dashboard_get_civi_objects('Contact', FALSE, array('id'=> $cid));
-
-        $studio_event_label = $weekend_label . " - ". $studio_contact['display_name'];
 
         $ret['add_guide_image_link'][] ="<strong>".$studio_event_label." -- </strong>".
           l(t("Upload Printed Guide Image"), "node/add/guide-image",
@@ -1559,6 +1555,8 @@ function artspan_member_dashboard_events_block($member) {
   $membershipName = $membershipStatus['values'][0]['name'];
   $membershipLabel = $membershipStatus['values'][0]['label'];
 
+  $msg = '';
+
   // 1. CHECK MEMBERSHIP STATUS
   // --------------------------------------------------------------------------------
   // Confirm that the user is a current member that qualifies to register
@@ -1995,20 +1993,6 @@ function _artspan_member_dashboard_studio_event_form_alter(&$form,
   unset($form['field_studioevent_member_dash']);
   unset($form['field_studioevent_participant_id']);
 
-  //FETCH ALL THE STUDIO CONTACTS SO WE CAN HAVE OUR DROPDOWN APPEAR THE
-  //WAY WE WANT
-  $studio_contacts =
-    artspan_member_dashboard_get_non_filtered_group_studios();
-
-  $options = array();
-  $options['_none'] = t("- Select a value -");
-  foreach($studio_contacts as $id => $display_name) {
-    $options[$id] = $display_name;
-  }
-  $form['field_studioevent_contact'][LANGUAGE_NONE]['#options'] = $options;
-  $node = $form_state['node'];
-  $form['field_studioevent_contact'][LANGUAGE_NONE]['#default_value'] = $node->field_studioevent_contact[LANGUAGE_NONE][0]['contact_id'];
-
   //SEE IF WE CAN FIND AN NID, IF SO IT MEANS WE ARE EDIT RATHER THAN CREATE
   if (isset($form['nid']) && isset($form['nid']['#value']) &&
     $form['nid']['#value']) {
@@ -2261,12 +2245,9 @@ function artspan_member_dashboard_node_presave($node) {
           ));
       }
 
-      if ($create_result && isset($create_result['values']) &&
+      if (isset($create_result) && isset($create_result['values']) &&
         $create_result['values']) {
         $new_contact_id = $create_result['values'][0]['id'];
-
-        $node->field_studioevent_contact[LANGUAGE_NONE][0]['contact_id'] =
-          $new_contact_id;
 
         $add_result = civicrm_api3('Address', 'create',
           array(
@@ -2327,8 +2308,11 @@ function artspan_member_dashboard_node_presave($node) {
     $artist_name = $artist_name ? $artist_name : $contact['display_name'];
 
 
-    $node->title = $event['title'] . ": " . $artist_name . ": " .
-      $studio_contact['display_name'];
+    $title = $event['title'] . ": " . $artist_name;
+    if (isset($studio_contact['display_name'])) {
+      $title .= ": " . $studio_contact['display_name'];
+    }
+    $node->title = $title;
 
 
     /**
@@ -2607,6 +2591,7 @@ function artspan_member_dashboard_open_registration() {
  * attributes
  */
 function artspan_member_dashboard_get_civi_objects($type, $multiple, $args, $action='get') {
+  civicrm_initialize();
 
   $args['sequential'] = 1;
   $result = civicrm_api3($type, $action, $args);
@@ -2680,28 +2665,6 @@ function artspan_member_dashboard_get_single_field_value($node, $field_name,
  **/
 
 
-
-/**
- * _node_validate()
- *
- * Node API validate hook, because of a conditional field civicrm reference
- * field issue we will grab the value of the studio contact dropdown value
- * under the correct conditions and stash it in the function for the presave
- * to pick up.
- **/
-function artspan_member_dashboard_node_validate($node) {
-  $studio_contact_id =
-    artspan_member_dashboard_get_single_field_value($node,
-      'field_studioevent_contact',
-      'contact_id');
-
-  //FIXME ME: THERE IS A PROBLEM WITH CONDITIONAL FIELDS AND THE CIVI
-  //CONTACT FIELD WHERE THE VALUE GETS DROPPED BY THE TIME presave HAPPENS.
-  //THEREFORE WE ARE STASHING THE CID IN THE SESSION HERE AND USING IT LATER
-  //IN THE presave HOOK
-  $_SESSION['artspan_member_dashboard_studio_event_studio_contact_id'] =
-    $studio_contact_id;
-}
 
 
 /**
