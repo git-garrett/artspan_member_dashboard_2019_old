@@ -904,24 +904,25 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
   if (isset($contactID)) {
 
     $membership = civicrm_api3('Membership', 'get', array('sequential' => 1, 'contact_id' => $contactID, 'membership_type_id' => 1));
-    $membershipStatusID = $membership['values'][0]['status_id'];
+    $last_membership_key = artspan_member_dashboard_get_last_membership($membership);
+    $membershipStatusID = $membership['values'][$last_membership_key]['status_id'];
 
     // Membership data
     if ($membership) {
 
       if (isset($membership['values'])
-        && isset($membership['values'][0])
-        && $membership['values'][0]['join_date'] !== NULL
-        && $membership['values'][0]['start_date'] !== NULL
-        && $membership['values'][0]['end_date'] !== NULL
-        && $membership['values'][0]['id'] !== NULL
-        && $membership['values'][0]['membership_name'] !== NULL) {
+        && isset($membership['values'][$last_membership_key])
+        && $membership['values'][$last_membership_key]['join_date'] !== NULL
+        && $membership['values'][$last_membership_key]['start_date'] !== NULL
+        && $membership['values'][$last_membership_key]['end_date'] !== NULL
+        && $membership['values'][$last_membership_key]['id'] !== NULL
+        && $membership['values'][$last_membership_key]['membership_name'] !== NULL) {
 
-        $ret['membership_id'] = $membership['values'][0]['id'];
-        $ret['membership_join_date'] = $membership['values'][0]['join_date'];
-        $ret['membership_start_date'] = $membership['values'][0]['start_date'];
-        $ret['membership_end_date'] = $membership['values'][0]['end_date'];
-        $ret['membership_name'] = $membership['values'][0]['membership_name'];
+        $ret['membership_id'] = $membership['values'][$last_membership_key]['id'];
+        $ret['membership_join_date'] = $membership['values'][$last_membership_key]['join_date'];
+        $ret['membership_start_date'] = $membership['values'][$last_membership_key]['start_date'];
+        $ret['membership_end_date'] = $membership['values'][$last_membership_key]['end_date'];
+        $ret['membership_name'] = $membership['values'][$last_membership_key]['membership_name'];
 
         // Membership Status Data
         // #FIXME -- membership_status doesn't return data at all on the dashboard
@@ -1550,7 +1551,8 @@ function artspan_member_dashboard_events_block($member) {
   $contactID = $contact['values'][0]['contact_id'];
 
   $membership = civicrm_api3('Membership', 'get', array('sequential' => 1, 'contact_id' => $contactID, 'membership_type_id' => 1));
-  $membershipStatusID = $membership['values'][0]['status_id'];
+  $last_membership_key = artspan_member_dashboard_get_last_membership($membership);
+  $membershipStatusID = $membership['values'][$last_membership_key]['status_id'];
 
   $membershipStatus = civicrm_api3('MembershipStatus', 'get', array('sequential' => 1, 'id' => $membershipStatusID));
 
@@ -1786,6 +1788,30 @@ function artspan_member_dashboard_events_block($member) {
   $ret['body'] = $body;
 
   return $ret;
+}
+
+/**
+ * _get_last_membership()
+ *
+ * @param $memberships - this is an array that has all information about the civi
+ * user memberships.
+ *
+ * When a civi user has multiple memberships, this function returns the index of
+ * the one with the latest end_date.
+ */
+function artspan_member_dashboard_get_last_membership($memberships) {
+  $last_membership_key = 0;
+  if ($memberships['count'] > 1) {
+    $last_membership_date = 0;
+    foreach ($memberships['values'] as $key => $membership_item) {
+      if ($membership_item['end_date'] > $last_membership_date) {
+        $last_membership_date = $membership_item['end_date'];
+        $last_membership_key = $key;
+      }
+    }
+  }
+
+  return $last_membership_key;
 }
 
 /**
