@@ -1932,12 +1932,59 @@ function artspan_member_dashboard_form_alter(&$form, &$form_state) {
     $form['type']['#value'] == 'guide_image') {
     _artspan_member_dashboard_guide_image_form_alter($form, $form_state);
   }
+  if ((isset($form['#node_edit_form']) && $form['#node_edit_form']) &&
+    ($form['type']['#value'] == 'guide_image' || $form['type']['#value'] == 'open_studios_app_guide_image' )) {
+    $form['actions']['submit']['#submit'][] = '_callback_on_postsave';
+  }
   if (isset($form['#node_edit_form']) && $form['#node_edit_form'] &&
     $form['type']['#value'] == 'artwork') {
     _artspan_member_dashboard_artwork_form_alter($form, $form_state);
   }
 
 }
+
+/**
+ * General Callback for guide_image and open_studios_app_guide_image form_alter.
+ * Check when a user has finished adding all their events and all their guide images.
+ *
+ * @param $form
+ * @param $form_state
+ */
+function _callback_on_postsave($form, &$form_state) {
+  $member = $_SESSION['artspan_member'];
+
+  // If not all events have been created yet.
+  if ($member['studio_event_counter'] < $member['os_weekend_count']) {
+    return;
+  }
+
+  $guide_image_counter = $member['guide_image_counter'];
+  $basic_image_counter = $member['basic_image_counter'];
+
+  $nid = $form_state['values']['nid'];
+  $node = node_load($nid);
+
+  if ($node->type == 'guide_image') {
+    $guide_image_counter += 1;
+  }
+
+  if ($node->type == 'open_studios_app_guide_image') {
+    $basic_image_counter += 1;
+  }
+
+  // If not all guide images are uploaded yet.
+  if ($guide_image_counter < $member['os_premium_count']) {
+    return;
+  }
+
+  // If not all basic images are uploaded yet.
+  if ($basic_image_counter < ($member['os_weekend_count'] - $member['os_premium_count'])) {
+    return;
+  }
+
+  drupal_set_message(t('Your SFOS Registration is complete. Thank you for registering your SF Open Studios event.'));
+}
+
 /**
  * Function alters teh guide-image form,  actually does nothing for now
  */
