@@ -1702,46 +1702,40 @@ function artspan_member_dashboard_events_block($member) {
       $msg .= "<br/>";
     }
 
-    // Registered: 1 Premier
-    // S. Events:  1
-    if ($premier_count > count($member['guide_images']) &&
-      $premier_count == 1 &&
-      $eventsCreatedSoFar > 0) {
+    if ($eventsCreatedSoFar > 0) {
+      $postfix = '';
 
-      //Message for next to each studio
-      $msg .= "<strong>".t("Guide Image")."</strong><br/>";
-      $msg .= t("Please upload an artwork image.");
+      // Registered: 1 or 2 Premier
+      if ($premier_count == $weekend_count) {
+        if ($member['guide_image_counter'] < $premier_count) {
+          if (($premier_count - $member['guide_image_counter']) > 1) {
+            $postfix = 's';
+          }
+          $msg .= t("Next, you need to scroll down and submit your Printed Guide Image!postfix!",
+            array('!postfix' => $postfix));
+        }
+      }
+      // Registered: 1 Reg + 1 Premier
+      elseif ($premier_count == 1 && $weekend_count == 2) {
+        if ($member['guide_image_counter'] == 0) {
+          $msg .= t("Next, you need to scroll down and submit your Printed Guide Image!");
+        }
+        elseif ($member['basic_image_counter'] == 0 && $eventsCreatedSoFar > 1) {
+          $msg .= t("Next, you need to scroll down and submit your Online Guide Image!");
+        }
+      }
+      // Registered: 1 or 2 Basic
+      elseif ($premier_count == 0) {
+        if ($member['basic_image_counter'] < $weekend_count) {
+          if (($weekend_count - $member['basic_image_counter']) > 1) {
+            $postfix = 's';
+          }
+          $msg .= t("Next, you need to scroll down and submit your Online Guide Image!postfix!",
+            array('!postfix' => $postfix));
+        }
+      }
     }
 
-    // Registered: 1 Reg + 1 Premier
-    // S. Events:  1-2
-    // G. Images:  0
-    else if ($premier_count > count($member['guide_images']) &&
-      $premier_count == 1 &&
-      count($member['guide_images']) == 0 &&
-      $eventsCreatedSoFar > 1) {
-
-      //Message for next to each studio
-      $msg .= "<strong>".t("Guide Image")."</strong><br/>";
-      $msg .= t("Please upload an artwork image for the Printed Guide");
-      $msg .= t("IMPORTANT: Uploading an image will designate this weekend as your premier weekend");
-    }
-
-    // Registered: 2 Premier
-    // S. Events:  1-2
-    // G. Images:  0
-    if ($premier_count > count($member['guide_images']) &&
-      $premier_count == 2 &&
-      isset($member['add_guide_image_link']) &&
-      $eventsCreatedSoFar > 1) {
-
-      $postfix = count($member['guide_images']) > 1 ? 's' : '';
-      $msg = t("Next, you need to scroll down and submit your Printed Guide Image!postfix",
-        array('!postfix'=>$postfix));
-
-      $msg .= t('!');
-      $msg .= "</ul>";
-    }
 
     // Set the brick-red message at the top of the dashboard
     drupal_set_message($msg, 'error');
