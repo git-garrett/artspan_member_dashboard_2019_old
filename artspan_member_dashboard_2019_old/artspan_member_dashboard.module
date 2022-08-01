@@ -1586,7 +1586,8 @@ function artspan_member_dashboard_events_block($member) {
     // 1.2 EXPIRED MEMBERSHIP
     //we have a membership that isn't up to date, prompt them to renew
     if ($membershipLabel != 'Current' &&
-      $membershipLabel != 'Pending'&&
+      $membershipLabel != 'Pending' &&
+      $membershipLabel != 'New' &&
       $membershipLabel != 'Grace') {
 
       $eventTitle = $member['os_event_title'];
