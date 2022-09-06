@@ -1763,7 +1763,22 @@ function artspan_member_dashboard_events_block($member) {
 
     // Registration Type
     $type = rtrim($member['os_priceset_label'], " - 1");
-    $body .= "<strong>Type:</strong> ".$type."</td></tr></table>";
+    $body .= "<strong>Type:</strong>" . $type . "</td></tr>";
+
+    // Weekend and Studio Address
+    foreach ($member['studio_events'] as $studio_event) {
+      $wrapper = entity_metadata_wrapper('node', $studio_event);
+      $body .= "<tr><td>";
+      if ($wrapper->field_studioevent_weekend->value()) {
+        $body .= "<strong>Weekend:</strong>" . $wrapper->field_studioevent_weekend->label();
+      }
+      if ($wrapper->field_studio_address_new->value()) {
+        $body .= "; " . implode(', ', array_diff($wrapper->field_studio_address_new->value(), array('')));
+      }
+      $body .= "</tr></td>";
+    }
+
+    $body .= "</table>";
 
     // also add the current status message from 2.1 to the block area
     if ($msg) {
