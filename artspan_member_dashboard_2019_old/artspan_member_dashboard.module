@@ -1613,6 +1613,7 @@ function artspan_member_dashboard_events_block($member) {
     //Otherwise, we can assume that we have a current member, so display them the registration link
     if (($membershipLabel == 'Current' ||
         $membershipLabel == 'Pending' ||
+        $membershipLabel == 'New' ||
         $membershipLabel == 'Grace') &&
       (!isset($participant_id) ||
         !$participant_id && $registered = 0)) {
