@@ -997,6 +997,12 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
             'participant_id'=>
               $ret['os_participant_id'])));
 
+    // For basic registration
+    if ($ret['os_premium_count'] == 0) {
+      $ret['add_studio_event_link'] =
+        l("Add SF Open Studios Listing", "https://sfosguide.com/");
+    }
+
     //GET VIEW OF ALL THE STUDIO EVENTS TIED TO THE PARTICIPANT ID
     $view = views_get_view('studio_event_member_dashboard_block');
     if (!$view) {
