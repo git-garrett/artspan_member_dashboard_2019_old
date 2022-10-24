@@ -1000,7 +1000,7 @@ function artspan_member_dashboard_get_member_array($arg = NULL) {
     // For basic registration
     if ($ret['os_premium_count'] == 0) {
       $ret['add_studio_event_link'] =
-        l("Add SF Open Studios Listing", "https://sfosguide.com/");
+        l("Add SF Open Studios Listing", "https://sfosguide.com/artistlisting");
     }
 
     //GET VIEW OF ALL THE STUDIO EVENTS TIED TO THE PARTICIPANT ID
